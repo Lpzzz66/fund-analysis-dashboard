@@ -39,6 +39,15 @@ class ValidationStateError(ValidationServiceError):
     """The version cannot be validated in its current lifecycle state."""
 
 
+VALIDATABLE_VERSION_STATUSES = {
+    ValuationStatus.RECEIVED,
+    ValuationStatus.PARSING,
+    ValuationStatus.VALIDATING,
+    ValuationStatus.PUBLISHABLE,
+    ValuationStatus.PENDING_REVIEW,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationSummary:
     """Small persistence-independent summary for callers that need counts."""
@@ -124,21 +133,48 @@ class ValidationService:
         except SQLAlchemyError as exc:
             raise ValidationServiceError("validation_persistence_failed") from exc
 
-    def validate(self, version_id: int, **kwargs: object) -> ValidationReport:
+    def validate(
+        self,
+        version_id: int,
+        *,
+        parsed: ParsedValuation | None = None,
+        actor_user_id: int | None = None,
+        tolerances: ToleranceConfig | None = None,
+    ) -> ValidationReport:
         """Short alias for callers that treat the service as a use case."""
 
-        return self.validate_version(version_id, **kwargs)
+        return self.validate_version(
+            version_id,
+            parsed=parsed,
+            actor_user_id=actor_user_id,
+            tolerances=tolerances,
+        )
 
-    def summary(self, version_id: int, **kwargs: object) -> ValidationSummary:
+    def summary(
+        self,
+        version_id: int,
+        *,
+        parsed: ParsedValuation | None = None,
+        actor_user_id: int | None = None,
+        tolerances: ToleranceConfig | None = None,
+    ) -> ValidationSummary:
         """Validate and return the version id together with the report."""
 
         return ValidationSummary(
             version_id=version_id,
-            report=self.validate_version(version_id, **kwargs),
+            report=self.validate_version(
+                version_id,
+                parsed=parsed,
+                actor_user_id=actor_user_id,
+                tolerances=tolerances,
+            ),
         )
 
     def _load_version(self, version_id: int) -> ValuationVersion:
-        version = self.session.get(ValuationVersion, version_id)
+        statement = select(ValuationVersion).where(ValuationVersion.id == version_id)
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        version = self.session.scalar(statement)
         if version is None:
             raise ValidationVersionNotFound("valuation_version_not_found")
         return version
@@ -154,6 +190,15 @@ class ValidationService:
             raise ValidationStateError("published_version_is_immutable")
         if status == ValuationStatus.REJECTED:
             raise ValidationStateError("rejected_version_is_immutable")
+        if status not in VALIDATABLE_VERSION_STATUSES:
+            raise ValidationStateError(f"invalid_status_for_validation:{status.value}")
+
+    @property
+    def _supports_row_locks(self) -> bool:
+        return (
+            self.session.bind is not None
+            and self.session.bind.dialect.name == "postgresql"
+        )
 
     def _validate_stored_values(
         self,

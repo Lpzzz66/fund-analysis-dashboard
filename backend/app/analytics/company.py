@@ -64,9 +64,9 @@ def calculate_company_index(
     for position, day in enumerate(days):
         current = grouped[day]
         current_assets = [
-            current[fund_id][0]
+            asset
             for fund_id in expected_ids
-            if fund_id in current and current[fund_id][0] is not None
+            if fund_id in current and (asset := current[fund_id][0]) is not None
         ]
         total_net_assets = sum(current_assets, Decimal(0)) if current_assets else None
         if position == 0:
@@ -90,9 +90,9 @@ def calculate_company_index(
 
         previous = grouped[days[position - 1]]
         previous_assets = [
-            previous[fund_id][0]
+            asset
             for fund_id in expected_ids
-            if fund_id in previous and previous[fund_id][0] is not None
+            if fund_id in previous and (asset := previous[fund_id][0]) is not None
         ]
         previous_total = sum(previous_assets, Decimal(0))
         eligible = [
@@ -103,13 +103,16 @@ def calculate_company_index(
             and previous[fund_id][0] is not None
             and current[fund_id][1] is not None
         ]
+        weighted_returns: list[Decimal] = []
+        for fund_id in eligible:
+            previous_nav = previous[fund_id][0]
+            daily_return = current[fund_id][1]
+            if previous_nav is not None and daily_return is not None:
+                weighted_returns.append((previous_nav / previous_total) * daily_return)
         company_return = None
         company_index = None
-        if eligible and previous_total != 0:
-            company_return = sum(
-                (previous[fund_id][0] / previous_total) * current[fund_id][1]
-                for fund_id in eligible
-            )
+        if weighted_returns and previous_total != 0:
+            company_return = sum(weighted_returns, Decimal(0))
             if last_index is not None:
                 company_index = last_index * (Decimal(1) + company_return)
         last_index = company_index

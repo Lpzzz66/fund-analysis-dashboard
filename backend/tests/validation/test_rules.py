@@ -1,5 +1,7 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from app.db.base import ValidationLevel, ValuationStatus
@@ -116,7 +118,7 @@ def test_parsed_valuation_identity_and_parser_warnings_are_included() -> None:
     }
 
 
-def test_validation_service_persists_results_and_blocks_released_version(
+def test_validation_service_persists_results(
     session: Session,
 ) -> None:
     from app.db.models import (
@@ -125,7 +127,7 @@ def test_validation_service_persists_results_and_blocks_released_version(
         ValidationResult,
         ValuationVersion,
     )
-    from app.validation.service import ValidationService, ValidationStateError
+    from app.validation.service import ValidationService
 
     fund = Fund(standard_name="校验产品")
     session.add(fund)
@@ -163,7 +165,82 @@ def test_validation_service_persists_results_and_blocks_released_version(
     )
     assert result_count >= 3
 
-    version.status = ValuationStatus.PUBLISHED
+
+@pytest.mark.parametrize(
+    ("status", "error_code"),
+    [
+        (ValuationStatus.FAILED, "invalid_status_for_validation:failed"),
+        (ValuationStatus.DUPLICATE, "invalid_status_for_validation:duplicate"),
+        (
+            ValuationStatus.NON_VALUATION,
+            "invalid_status_for_validation:non_valuation",
+        ),
+        (ValuationStatus.REJECTED, "rejected_version_is_immutable"),
+        (ValuationStatus.PUBLISHED, "published_version_is_immutable"),
+        (ValuationStatus.SUPERSEDED, "published_version_is_immutable"),
+        (ValuationStatus.REVOKED, "published_version_is_immutable"),
+    ],
+)
+def test_validation_service_rejects_terminal_lifecycle_states(
+    session: Session,
+    status: ValuationStatus,
+    error_code: str,
+) -> None:
+    from app.db.models import Fund, ValuationVersion
+    from app.validation.service import ValidationService, ValidationStateError
+
+    fund = Fund(standard_name=f"终态校验产品-{status.value}")
+    session.add(fund)
+    session.flush()
+    version = ValuationVersion(
+        fund_id=fund.id,
+        valuation_date=date(2026, 8, 25),
+        version_no=1,
+        status=status,
+    )
+    session.add(version)
     session.commit()
-    with pytest.raises(ValidationStateError, match="published_version_is_immutable"):
+
+    with pytest.raises(ValidationStateError, match=error_code):
         ValidationService(session).validate_version(version.id)
+
+
+def test_validation_service_accepts_parser_import_state(session: Session) -> None:
+    from app.db.models import Fund, ValuationVersion
+    from app.validation.service import ValidationService
+
+    fund = Fund(standard_name="解析状态兼容产品")
+    session.add(fund)
+    session.flush()
+    version = ValuationVersion(
+        fund_id=fund.id,
+        valuation_date=date(2026, 8, 25),
+        version_no=1,
+        status=ValuationStatus.PARSING,
+    )
+    session.add(version)
+    session.commit()
+
+    report = ValidationService(session).validate_version(version.id)
+
+    assert report.status == ValuationStatus.PENDING_REVIEW
+
+
+def test_postgresql_validation_load_locks_version_row() -> None:
+    from app.validation.service import ValidationService, ValidationVersionNotFound
+
+    class RecordingSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+        statement: object | None = None
+
+        def scalar(self, statement: object) -> None:
+            self.statement = statement
+
+    recording_session = RecordingSession()
+    service = ValidationService(cast(Session, recording_session))
+
+    with pytest.raises(ValidationVersionNotFound):
+        service._load_version(123)
+
+    assert recording_session.statement is not None
+    assert recording_session.statement._for_update_arg is not None  # type: ignore[attr-defined]

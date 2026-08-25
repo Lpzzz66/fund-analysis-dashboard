@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -84,6 +84,53 @@ def _version(
     )
     session.flush()
     return version
+
+
+def _released_version(session: Session, status: ValuationStatus) -> ValuationVersion:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+    service = PublishingService(session)
+    service.publish(version.id, actor_user_id=actor.id)
+    session.commit()
+    if status == ValuationStatus.SUPERSEDED:
+        replacement = _version(session, fund, 2)
+        session.commit()
+        service.publish(replacement.id, actor_user_id=actor.id)
+        session.commit()
+    elif status == ValuationStatus.REVOKED:
+        service.revoke(version.id, actor_user_id=actor.id, reason="撤回测试")
+        session.commit()
+    return version
+
+
+def _mutate_version_parent(
+    session: Session, version: ValuationVersion, field: str
+) -> None:
+    if field == "fund_id":
+        other_fund = Fund(standard_name="发布测试产品-其他")
+        session.add(other_fund)
+        session.flush()
+        version.fund_id = other_fund.id
+    elif field == "valuation_date":
+        version.valuation_date = date(2026, 8, 26)
+    elif field == "version_no":
+        version.version_no = 99
+    elif field == "source_file_id":
+        version.source_file_id = 999_999
+    elif field == "parser_rule_set_id":
+        version.parser_rule_set_id = 999_999
+    elif field == "status":
+        version.status = ValuationStatus.PUBLISHABLE
+    elif field == "published_by":
+        version.published_by = "tampered-actor"
+    elif field == "release_reason":
+        version.release_reason = "篡改发布原因"
+    elif field == "published_at":
+        version.published_at = datetime(2030, 1, 1, tzinfo=UTC)
+    else:
+        raise AssertionError(f"unknown field: {field}")
 
 
 def test_publish_creates_audit_and_analysis_run(session: Session) -> None:
@@ -356,4 +403,59 @@ def test_released_version_details_cannot_be_updated_or_deleted(
     )
     session.delete(snapshot)
     with pytest.raises(PublishedVersionImmutableError):
+        session.flush()
+
+
+def test_released_version_parent_cannot_be_deleted(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+    PublishingService(session).publish(version.id, actor_user_id=actor.id)
+    session.commit()
+
+    session.delete(version)
+    with pytest.raises(
+        PublishedVersionImmutableError,
+        match="published_version_parent_is_immutable",
+    ):
+        session.flush()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ValuationStatus.PUBLISHED,
+        ValuationStatus.SUPERSEDED,
+        ValuationStatus.REVOKED,
+    ],
+)
+@pytest.mark.parametrize(
+    "field",
+    [
+        "fund_id",
+        "valuation_date",
+        "version_no",
+        "source_file_id",
+        "parser_rule_set_id",
+        "status",
+        "published_by",
+        "release_reason",
+        "published_at",
+    ],
+)
+def test_released_version_parent_fields_cannot_be_modified_directly(
+    session: Session,
+    status: ValuationStatus,
+    field: str,
+) -> None:
+    version = _released_version(session, status)
+    assert version.status == status
+
+    _mutate_version_parent(session, version, field)
+
+    with pytest.raises(
+        PublishedVersionImmutableError,
+        match="published_version_parent_is_immutable",
+    ):
         session.flush()

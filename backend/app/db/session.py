@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from sqlalchemy import Engine, event
 from sqlalchemy import create_engine as sqlalchemy_create_engine
@@ -28,7 +29,7 @@ def create_engine(database_url: str | None = None, *, echo: bool = False) -> Eng
     if url.startswith("sqlite"):
 
         @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(dbapi_connection: object, _: object) -> None:
+        def _enable_sqlite_foreign_keys(dbapi_connection: Any, _: object) -> None:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()

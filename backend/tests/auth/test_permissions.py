@@ -1,5 +1,8 @@
 import pytest
+from app.auth.service import AuthService
+from app.db.base import UserRole, UserStatus
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 @pytest.mark.security
@@ -77,3 +80,68 @@ def test_admin_can_change_role_reset_enable_and_revoke_sessions(
     assert disabled.json()["data"]["status"] == "disabled"
     assert enabled.json()["data"]["status"] == "active"
     assert reset.status_code == 200
+
+
+@pytest.mark.security
+def test_admin_cannot_disable_self(
+    app_and_engine: tuple[object, object],
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        service = AuthService(session)
+        actor = service.initialize_admin("admin", "correct horse").user
+
+        with pytest.raises(
+            service.AccountProtection, match="admin_cannot_disable_self"
+        ):
+            service.set_user_status(actor, actor.id, UserStatus.DISABLED)
+
+        assert actor.status == UserStatus.ACTIVE
+
+
+@pytest.mark.security
+def test_admin_cannot_downgrade_self(
+    app_and_engine: tuple[object, object],
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        service = AuthService(session)
+        actor = service.initialize_admin("admin", "correct horse").user
+
+        with pytest.raises(
+            service.AccountProtection, match="admin_cannot_downgrade_self"
+        ):
+            service.change_role(actor, actor.id, UserRole.OPERATOR)
+
+        assert actor.role == UserRole.ADMIN
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("operation", ["disable", "downgrade"])
+def test_last_active_admin_cannot_be_removed(
+    app_and_engine: tuple[object, object],
+    operation: str,
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        service = AuthService(session)
+        active_admin = service.initialize_admin("admin", "correct horse").user
+        inactive_admin = service.create_user(
+            active_admin,
+            "inactive-admin",
+            "correct horse",
+            UserRole.ADMIN,
+        )
+        service.set_user_status(active_admin, inactive_admin.id, UserStatus.DISABLED)
+        session.commit()
+
+        with pytest.raises(service.AccountProtection, match="last_active_admin"):
+            if operation == "disable":
+                service.set_user_status(
+                    inactive_admin, active_admin.id, UserStatus.DISABLED
+                )
+            else:
+                service.change_role(inactive_admin, active_admin.id, UserRole.OPERATOR)
+
+        assert active_admin.status == UserStatus.ACTIVE
+        assert active_admin.role == UserRole.ADMIN

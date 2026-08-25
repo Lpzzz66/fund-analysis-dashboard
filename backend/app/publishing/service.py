@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import event, select
+from sqlalchemy import event, inspect, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -48,7 +50,7 @@ class PublishingConflictError(PublishingServiceError):
 
 
 class PublishedVersionImmutableError(PublishingServiceError):
-    """Standardized details belonging to a released version cannot be edited."""
+    """Released valuation records and their standardized details cannot be edited."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,7 @@ IMMUTABLE_VERSION_STATUSES = {
     ValuationStatus.SUPERSEDED,
     ValuationStatus.REVOKED,
 }
+RELEASED_VERSION_MUTATION_KEY = "publishing_allowed_released_version_ids"
 
 
 @event.listens_for(Session, "before_flush")
@@ -101,6 +104,41 @@ def _protect_released_version_details(
         ):
             raise PublishedVersionImmutableError(
                 "published_version_details_are_immutable"
+            )
+
+    for item in tuple(session.dirty) + tuple(session.deleted):
+        if not isinstance(item, ValuationVersion):
+            continue
+        if item.id in session.info.get(RELEASED_VERSION_MUTATION_KEY, set()):
+            continue
+        if item in session.deleted:
+            if _coerce_status(item.status) in IMMUTABLE_VERSION_STATUSES:
+                raise PublishedVersionImmutableError(
+                    "published_version_parent_is_immutable"
+                )
+            continue
+        state = inspect(item)
+        changed_fields = tuple(
+            attribute.key
+            for attribute in state.mapper.column_attrs
+            if state.attrs[attribute.key].history.has_changes()
+        )
+        if not changed_fields:
+            continue
+        current_status = _coerce_status(item.status)
+        previous_statuses = {
+            status
+            for status in (
+                _coerce_status(value) for value in state.attrs.status.history.deleted
+            )
+            if status is not None
+        }
+        if (
+            current_status in IMMUTABLE_VERSION_STATUSES
+            or previous_statuses & IMMUTABLE_VERSION_STATUSES
+        ):
+            raise PublishedVersionImmutableError(
+                "published_version_parent_is_immutable"
             )
 
 
@@ -239,13 +277,16 @@ class PublishingService:
                 superseded = self._supersede_current(
                     version, actor_user_id=actor_user_id
                 )
-                version.status = ValuationStatus.PUBLISHED
-                version.published_at = utcnow()
-                version.published_by = actor_label or _actor_reference(actor_user_id)
-                version.release_reason = (
-                    _optional_reason(reason) or version.release_reason
-                )
-                self.session.flush()
+                with self._allow_released_version_mutation(version):
+                    version.status = ValuationStatus.PUBLISHED
+                    version.published_at = utcnow()
+                    version.published_by = actor_label or _actor_reference(
+                        actor_user_id
+                    )
+                    version.release_reason = (
+                        _optional_reason(reason) or version.release_reason
+                    )
+                    self.session.flush()
                 analysis_run = self._create_analysis_run(version, "valuation_published")
                 self._audit(
                     action="valuation.published",
@@ -290,8 +331,9 @@ class PublishingService:
                 version = self._load_version(version_id, for_update=True)
                 self._require_status(version, ValuationStatus.PUBLISHED)
                 self._lock_fund(version.fund_id)
-                version.status = ValuationStatus.REVOKED
-                self.session.flush()
+                with self._allow_released_version_mutation(version):
+                    version.status = ValuationStatus.REVOKED
+                    self.session.flush()
                 analysis_run = self._create_analysis_run(version, "valuation_revoked")
                 self._audit(
                     action="valuation.revoked",
@@ -339,11 +381,14 @@ class PublishingService:
                 superseded = self._supersede_current(
                     version, actor_user_id=actor_user_id
                 )
-                version.status = ValuationStatus.PUBLISHED
-                version.published_at = utcnow()
-                version.published_by = actor_label or _actor_reference(actor_user_id)
-                version.release_reason = restore_reason
-                self.session.flush()
+                with self._allow_released_version_mutation(version):
+                    version.status = ValuationStatus.PUBLISHED
+                    version.published_at = utcnow()
+                    version.published_by = actor_label or _actor_reference(
+                        actor_user_id
+                    )
+                    version.release_reason = restore_reason
+                    self.session.flush()
                 analysis_run = self._create_analysis_run(version, "valuation_restored")
                 self._audit(
                     action="valuation.restored",
@@ -417,17 +462,35 @@ class PublishingService:
         if self._supports_row_locks:
             statement = statement.with_for_update()
         current = tuple(self.session.scalars(statement).all())
-        for version in current:
-            version.status = ValuationStatus.SUPERSEDED
-            self._audit(
-                action="valuation.superseded",
-                version=version,
-                actor_user_id=actor_user_id,
-                summary={"replacement_version_id": target.id},
-            )
-        if current:
-            self.session.flush()
+        with self._allow_released_version_mutation(*current):
+            for version in current:
+                version.status = ValuationStatus.SUPERSEDED
+                self._audit(
+                    action="valuation.superseded",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    summary={"replacement_version_id": target.id},
+                )
+            if current:
+                self.session.flush()
         return current
+
+    @contextmanager
+    def _allow_released_version_mutation(
+        self, *versions: ValuationVersion
+    ) -> Iterator[None]:
+        previous = set(self.session.info.get(RELEASED_VERSION_MUTATION_KEY, set()))
+        self.session.info[RELEASED_VERSION_MUTATION_KEY] = {
+            *previous,
+            *(version.id for version in versions),
+        }
+        try:
+            yield
+        finally:
+            if previous:
+                self.session.info[RELEASED_VERSION_MUTATION_KEY] = previous
+            else:
+                self.session.info.pop(RELEASED_VERSION_MUTATION_KEY, None)
 
     def _ensure_publish_validation(
         self, version: ValuationVersion, *, confirm_warnings: bool
@@ -518,6 +581,13 @@ class PublishingService:
             self.session.bind is not None
             and self.session.bind.dialect.name == "postgresql"
         )
+
+
+def _coerce_status(value: object) -> ValuationStatus | None:
+    try:
+        return ValuationStatus(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _required_reason(value: str, error_code: str) -> str:

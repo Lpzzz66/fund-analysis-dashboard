@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -60,6 +61,11 @@ class ChangeRoleRequest(BaseModel):
 
 
 def _user_data(user: User) -> dict[str, object]:
+    navigation = {
+        UserRole.ADMIN: ("dashboard", "funds", "imports", "reviews", "users"),
+        UserRole.OPERATOR: ("dashboard", "funds", "imports", "reviews"),
+        UserRole.VIEWER: ("dashboard", "funds"),
+    }
     return {
         "id": user.id,
         "username": user.username,
@@ -67,6 +73,7 @@ def _user_data(user: User) -> dict[str, object]:
         "role": user.role,
         "status": user.status,
         "last_login_at": user.last_login_at,
+        "navigation": navigation.get(UserRole(user.role), ("dashboard", "funds")),
     }
 
 
@@ -198,6 +205,32 @@ def create_user(
     return {"data": _user_data(user)}
 
 
+@user_router.get("")
+def list_users(
+    _: AdminContext,
+    session: DatabaseSession,
+    q: str | None = Query(default=None, max_length=100),
+    role: UserRole | None = Query(default=None),  # noqa: B008
+    user_status: UserStatus | None = Query(default=None, alias="status"),  # noqa: B008
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> dict[str, object]:
+    statement = select(User).order_by(User.username, User.id)
+    if q:
+        statement = statement.where(User.username.contains(q.strip()))
+    if role is not None:
+        statement = statement.where(User.role == role)
+    if user_status is not None:
+        statement = statement.where(User.status == user_status)
+    users = list(session.scalars(statement))
+    total = len(users)
+    offset = (page - 1) * page_size
+    return {
+        "data": [_user_data(user) for user in users[offset : offset + page_size]],
+        "meta": {"page": page, "page_size": page_size, "total": total},
+    }
+
+
 def _set_status(
     user_id: int,
     new_status: UserStatus,
@@ -207,6 +240,9 @@ def _set_status(
     try:
         user = AuthService(session).set_user_status(context.user, user_id, new_status)
         session.commit()
+    except AuthService.AccountProtection as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         session.rollback()
         raise HTTPException(status_code=404, detail="User not found") from exc
@@ -255,6 +291,9 @@ def change_role(
     try:
         user = AuthService(session).change_role(context.user, user_id, payload.role)
         session.commit()
+    except AuthService.AccountProtection as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         session.rollback()
         raise HTTPException(status_code=404, detail="User not found") from exc

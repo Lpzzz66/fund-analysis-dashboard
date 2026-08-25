@@ -156,7 +156,8 @@ def check_share_net_assets_total(
             message="存在份额类别净资产缺失，无法完成份额净资产合计校验",
         )
 
-    calculated = sum(values, Decimal(0))
+    calculated_values = [value for value in values if value is not None]
+    calculated = sum(calculated_values, Decimal(0))
     difference = calculated - net_assets
     if abs(difference) > tolerance:
         return ValidationFinding(

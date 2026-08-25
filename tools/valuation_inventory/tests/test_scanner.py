@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import date, datetime
 from pathlib import Path
 
+import pytest
+
 from tools.valuation_inventory import scanner
-from tools.valuation_inventory.models import FileType, ParseStatus, SourceZone
+from tools.valuation_inventory.excel_metadata import ProductCatalog
+from tools.valuation_inventory.models import (
+    ErrorType,
+    FileType,
+    ParseStatus,
+    SourceZone,
+)
 from tools.valuation_inventory.tests.conftest import (
     make_transaction_xlsx,
     make_valuation_xlsx,
@@ -219,6 +228,67 @@ class TestFaultIsolation:
             f.rel_path for f in parallel.files
         ]
         assert [f.sha256 for f in serial.files] == [f.sha256 for f in parallel.files]
+
+    def test_parallel_progress_counts_in_order(self, tmp_path):
+        root = tmp_path / "估值表A"
+        d = root / "梦一号估值表"
+        d.mkdir(parents=True)
+        for i in range(24):
+            (d / f"{i:02d}.txt").write_text(str(i), encoding="utf-8")
+
+        calls: list[tuple[int, int]] = []
+
+        def progress(done: int, total: int) -> None:
+            if done == 1:
+                time.sleep(0.01)
+            calls.append((done, total))
+
+        result = scanner.scan(root, scanner.ScanOptions(workers=8), progress=progress)
+
+        assert [done for done, _ in calls] == list(range(1, len(result.files) + 1))
+        assert {total for _, total in calls} == {len(result.files)}
+
+
+class TestPathSafety:
+    def test_symlink_files_and_directories_are_skipped(self, tmp_path):
+        root = tmp_path / "估值表A"
+        outside = tmp_path / "outside"
+        root.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("outside", encoding="utf-8")
+        make_valuation_xlsx(outside / "secret.xlsx")
+        (root / "inside.txt").write_text("inside", encoding="utf-8")
+
+        try:
+            (root / "linked.txt").symlink_to(outside / "secret.txt")
+            (root / "linked-dir").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as e:
+            pytest.skip(f"symlink unavailable: {e}")
+
+        result = scan_dir(root)
+
+        assert [f.rel_path for f in result.files] == ["inside.txt"]
+
+    def test_scan_file_rejects_path_resolving_outside_root(self, tmp_path):
+        root = tmp_path / "估值表A"
+        outside = tmp_path / "outside"
+        root.mkdir()
+        outside.mkdir()
+        make_valuation_xlsx(outside / "secret.xlsx")
+        link = root / "linked.xlsx"
+        try:
+            link.symlink_to(outside / "secret.xlsx")
+        except (OSError, NotImplementedError) as e:
+            pytest.skip(f"symlink unavailable: {e}")
+
+        info = scanner.scan_file(
+            root, "linked.xlsx", scanner.ScanOptions(), ProductCatalog()
+        )
+
+        assert info.parse_status is ParseStatus.FAILED
+        assert info.error_type is ErrorType.READ_ERROR
+        assert info.sha256 is None
+        assert str(outside.resolve()) not in info.error_message
 
 
 def snapshot(root: Path) -> dict[str, tuple[int, int]]:

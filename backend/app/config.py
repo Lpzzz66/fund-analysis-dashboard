@@ -63,6 +63,7 @@ def get_settings() -> Settings:
                 f"{', '.join(missing)} required when APP_ENV=production; "
                 "refusing to use local development storage"
             )
+        assert raw_database_url is not None
         if not raw_database_url.lower().startswith(("postgresql://", "postgresql+")):
             raise ValueError("DATABASE_URL must use PostgreSQL when APP_ENV=production")
 

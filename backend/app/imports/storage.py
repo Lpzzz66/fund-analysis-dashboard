@@ -15,6 +15,8 @@ ALLOWED_EXTENSIONS = {".xls", ".xlsx"}
 OLE_HEADER = bytes.fromhex("D0CF11E0A1B11AE1")
 ZIP_HEADER = b"PK\x03\x04"
 XLSX_REQUIRED_MEMBERS = {"[Content_Types].xml", "xl/workbook.xml"}
+MAX_XLSX_MEMBERS = 1_024
+MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 
 
 class UnsafeStoragePathError(ValueError):
@@ -129,7 +131,17 @@ def _validate_file_signature(path: Path, extension: str) -> None:
         raise InvalidFileError("invalid_file_signature")
     try:
         with ZipFile(path) as archive:
-            if not XLSX_REQUIRED_MEMBERS.issubset(archive.namelist()):
+            members = archive.infolist()
+            if len(members) > MAX_XLSX_MEMBERS:
+                raise InvalidFileError("xlsx_too_many_members")
+            if (
+                sum(member.file_size for member in members)
+                > MAX_XLSX_UNCOMPRESSED_BYTES
+            ):
+                raise InvalidFileError("xlsx_uncompressed_too_large")
+            if not XLSX_REQUIRED_MEMBERS.issubset(
+                {member.filename for member in members}
+            ):
                 raise InvalidFileError("invalid_file_signature")
             if archive.testzip() is not None:
                 raise InvalidFileError("invalid_file_signature")

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
 from app.db.base import SourceType, UserRole
-from app.db.models import BackgroundJob, ImportBatchFile
+from app.db.models import BackgroundJob, ImportBatch, ImportBatchFile
 from app.imports.service import ImportService
 
 router = APIRouter(prefix="/api/v1/imports", tags=["imports"])
@@ -144,7 +144,7 @@ def get_batch(
     }
 
 
-def _batch_data(batch: object) -> dict[str, object]:
+def _batch_data(batch: ImportBatch) -> dict[str, object]:
     return {
         "id": batch.id,
         "source_type": batch.source_type,

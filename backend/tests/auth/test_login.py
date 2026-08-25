@@ -1,11 +1,25 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from app.auth.service import AuthService
+from app.db.base import UserStatus
 from app.db.models import AuditLog, User, UserSession
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+class _RecordingPasswordHasher:
+    def __init__(self) -> None:
+        self.delegate = PasswordHasher()
+        self.verified_hashes: list[str] = []
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        self.verified_hashes.append(password_hash)
+        return self.delegate.verify(password_hash, password)
 
 
 @pytest.mark.security
@@ -77,6 +91,56 @@ def test_wrong_password_uses_generic_error_and_locks_after_five_failures(
         assert result.user.username == "admin"
         assert user.failed_login_count == 0
         assert user.locked_until is None
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("account_state", ["missing", "disabled", "locked"])
+def test_unusable_accounts_run_dummy_argon2id_verification(
+    app_and_engine: tuple[object, object],
+    account_state: str,
+) -> None:
+    _, engine = app_and_engine
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+    with Session(engine) as session:
+        service = AuthService(session)
+        user_hash: str | None = None
+        if account_state != "missing":
+            user = service.initialize_admin("admin", "correct horse").user
+            if account_state == "disabled":
+                user.status = UserStatus.DISABLED
+            else:
+                user.locked_until = now + timedelta(minutes=5)
+            user_hash = user.password_hash
+            session.flush()
+
+        recorder = _RecordingPasswordHasher()
+        service.password_hasher = recorder  # type: ignore[assignment]
+
+        with pytest.raises(service.InvalidCredentials):
+            service.authenticate("admin", "wrong password", now=now)
+
+        assert len(recorder.verified_hashes) == 1
+        assert recorder.verified_hashes[0].startswith("$argon2id$")
+        if user_hash is not None:
+            assert recorder.verified_hashes[0] != user_hash
+
+
+@pytest.mark.security
+def test_postgresql_authentication_load_locks_user_row() -> None:
+    class RecordingSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+        statement: object | None = None
+
+        def scalar(self, statement: object) -> None:
+            self.statement = statement
+
+    recording_session = RecordingSession()
+    service = AuthService(cast(Session, recording_session))
+
+    service._load_user("admin")
+
+    assert recording_session.statement is not None
+    assert recording_session.statement._for_update_arg is not None  # type: ignore[attr-defined]
 
 
 @pytest.mark.security

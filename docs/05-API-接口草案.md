@@ -60,7 +60,7 @@
 
 请求：账号、密码。
 
-结果：设置安全会话，返回当前用户基本信息和可访问导航。
+结果：设置安全会话，返回当前用户基本信息和可访问导航。导航仅用于前端显示，后端仍以每个接口的角色依赖为准。
 
 ### `POST /api/v1/auth/logout`（退出）
 
@@ -76,6 +76,7 @@
 
 管理员账号管理已实现以下最小接口，所有接口都由后端 `admin`（管理员）角色依赖保护：
 
+- `GET /api/v1/users`（用户列表）：支持账号关键字、角色、状态和分页筛选。
 - `POST /api/v1/users`（创建用户）：创建 `admin`（管理员）、`operator`（业务员）或 `viewer`（普通看板）账号。
 - `POST /api/v1/users/{user_id}/disable`（禁用账号）。
 - `POST /api/v1/users/{user_id}/enable`（启用账号）。
@@ -94,6 +95,8 @@
 - `mode`：`latest`（最新状态）或 `same_day`（同日汇总）。
 - `as_of`：同日汇总日期。
 - `range`：收益和回撤区间。
+
+当前实现的 `as_of`（估值日）按精确估值日筛选已发布版本；没有该日已发布数据的产品不回退到更早日期，并在 `coverage`（覆盖率）中体现缺口。停用产品不进入看板查询。
 
 返回：总净资产、产品数、覆盖率、公司收益、综合指数、回撤、风险数量、产品概览和质量状态。
 
@@ -176,7 +179,19 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `POST /api/v1/imports/{batch_id}/complete`（完成上传并创建 `background_job`（后台任务））。
 - `GET /api/v1/imports/{batch_id}`（查看批次、文件关联和任务状态）。
 
-首期默认单文件上限为 20 MB（兆字节）。上传文件先写配置的临时目录，校验扩展名和文件头后计算 SHA-256（安全哈希），正式存储使用随机对象名；重复哈希返回幂等结果并只新增批次关联。当前后台任务已接入 Excel 解析、标准化落库和校验：任务处理器按原始文件幂等创建估值版本，未知产品或日期进入复核审计，阻断校验结果不会进入看板。版本发布、替代、撤回和恢复已有领域服务，但对应 HTTP 路由仍待实现。
+首期默认单文件上限为 20 MB（兆字节）。上传文件先写配置的临时目录，校验扩展名和文件头后计算 SHA-256（安全哈希），正式存储使用随机对象名；重复哈希返回幂等结果并只新增批次关联。当前后台任务已接入 Excel 解析、标准化落库和校验：任务处理器按原始文件幂等创建估值版本，未知产品或日期进入复核审计，阻断校验结果不会进入看板。
+
+当前已实现的看板与复核 HTTP（网页接口）路径：
+
+- `GET /api/v1/dashboard/overview`（公司总览，只读已发布版本）。
+- `GET /api/v1/funds`、`GET /api/v1/funds/{fund_id}`（产品列表和详情）。
+- `GET /api/v1/funds/{fund_id}/nav-series`（净值序列）。
+- `GET /api/v1/funds/{fund_id}/positions`（持仓分页）。
+- `GET /api/v1/funds/{fund_id}/quality`（校验结果和质量状态）。
+- `GET /api/v1/reviews`、`POST /api/v1/reviews/{version_id}/acknowledge`（复核队列和复核决定）。
+- `POST /api/v1/valuations/{version_id}/publish|reject|revoke|restore`（版本生命周期操作）。
+
+看板查询只读取 `published`（已发布）版本；未发布、待复核、已替代和已撤回版本不会进入看板结果。当前分析结果仍按请求即时计算，尚未持久化公司指标和风险事件。
 
 ### `GET /api/v1/imports/{import_id}/validations`（校验结果）
 

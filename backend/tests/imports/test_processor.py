@@ -5,9 +5,11 @@ from io import BytesIO
 from app.auth.service import AuthService
 from app.db.base import SourceType, ValuationStatus
 from app.db.models import (
+    AccountSubjectDaily,
     Fund,
     FundDailySnapshot,
     PositionDaily,
+    SubjectMapping,
     ValuationVersion,
 )
 from app.imports.processor import process_import_batch
@@ -64,6 +66,14 @@ def test_processor_persists_version_snapshot_positions_and_validation(
         actor = AuthService(session).initialize_admin("admin", "correct horse").user
         fund = Fund(standard_name="千金一号")
         session.add(fund)
+        session.add(
+            SubjectMapping(
+                subject_code_or_prefix="1002",
+                standard_category="股票",
+                include_in_holdings=True,
+                rule_version="test-v1",
+            )
+        )
         session.flush()
         service = ImportService.from_settings(session, app.state.settings)
         batch = service.create_batch(SourceType.UPLOAD, actor.id)
@@ -90,8 +100,15 @@ def test_processor_persists_version_snapshot_positions_and_validation(
                 PositionDaily.valuation_version_id == version.id
             )
         )
+        subject = session.scalar(
+            select(AccountSubjectDaily).where(
+                AccountSubjectDaily.valuation_version_id == version.id
+            )
+        )
         assert snapshot.net_asset_value == 100
         assert position.market_value == 110
+        assert subject.standard_category == "股票"
+        assert subject.include_in_holdings is True
 
 
 def test_processor_treats_non_valuation_workbook_as_ignored(

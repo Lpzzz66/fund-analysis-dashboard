@@ -6,10 +6,12 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 from sqlalchemy import func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,10 @@ from app.db.models import AuditLog, SystemState, User, UserSession
 SESSION_TTL = timedelta(hours=12)
 LOCKOUT_THRESHOLD = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$f/2/WPIFPDH2/p/i7cvVDw$"
+    "3lSl2CF5KH6MNK9uqN/Gormtr/cCA1h9Ec4JShzlIUI"
+)
 
 
 class InvalidCredentialsError(Exception):
@@ -37,6 +43,10 @@ class InvalidOldPasswordError(Exception):
     """Raised when a password change cannot verify the current password."""
 
 
+class AccountProtectionError(LookupError):
+    """Raised when an account change would remove the last usable admin."""
+
+
 @dataclass(frozen=True, slots=True)
 class LoginResult:
     user: User
@@ -51,6 +61,7 @@ class AuthService:
     InitializationClosed = InitializationClosedError
     DuplicateUsername = DuplicateUsernameError
     InvalidOldPassword = InvalidOldPasswordError
+    AccountProtection = AccountProtectionError
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -96,10 +107,13 @@ class AuthService:
                 if state is None:
                     raise
 
-        result = self.session.execute(
-            update(SystemState)
-            .where(SystemState.id == 1, SystemState.initialized_at.is_(None))
-            .values(initialized_at=datetime.now(UTC))
+        result = cast(
+            CursorResult[Any],
+            self.session.execute(
+                update(SystemState)
+                .where(SystemState.id == 1, SystemState.initialized_at.is_(None))
+                .values(initialized_at=datetime.now(UTC))
+            ),
         )
         if result.rowcount != 1:
             raise InitializationClosedError
@@ -115,21 +129,22 @@ class AuthService:
     ) -> LoginResult:
         current_time = now or datetime.now(UTC)
         normalized_username = self._normalize_username(username)
-        user = self.session.scalar(
-            select(User).where(User.username == normalized_username)
-        )
+        user = self._load_user(normalized_username)
 
         if user is None:
+            self._verify_dummy_password(password)
             self._audit_login_failure(normalized_username, "invalid_credentials")
             self.session.flush()
             raise InvalidCredentialsError
 
         if user.status != UserStatus.ACTIVE:
+            self._verify_dummy_password(password)
             self._audit_login_failure(normalized_username, "invalid_credentials")
             self.session.flush()
             raise InvalidCredentialsError
 
         if user.locked_until and current_time < self._as_utc(user.locked_until):
+            self._verify_dummy_password(password)
             self._audit_login_failure(normalized_username, "locked")
             self.session.flush()
             raise InvalidCredentialsError
@@ -252,9 +267,18 @@ class AuthService:
         return user
 
     def set_user_status(self, actor: User, user_id: int, status: UserStatus) -> User:
-        user = self.session.get(User, user_id)
+        user = self._load_user_by_id(user_id)
         if user is None:
             raise LookupError(user_id)
+        if user.id == actor.id and status == UserStatus.DISABLED:
+            raise AccountProtectionError("admin_cannot_disable_self")
+        if (
+            status == UserStatus.DISABLED
+            and user.role == UserRole.ADMIN
+            and user.status == UserStatus.ACTIVE
+            and self._active_admin_count() <= 1
+        ):
+            raise AccountProtectionError("last_active_admin_cannot_be_disabled")
         user.status = status
         if status == UserStatus.DISABLED:
             self._revoke_user_sessions(user.id)
@@ -285,9 +309,18 @@ class AuthService:
         return user
 
     def change_role(self, actor: User, user_id: int, role: UserRole) -> User:
-        user = self.session.get(User, user_id)
+        user = self._load_user_by_id(user_id)
         if user is None:
             raise LookupError(user_id)
+        if user.id == actor.id and role != UserRole.ADMIN:
+            raise AccountProtectionError("admin_cannot_downgrade_self")
+        if (
+            role != UserRole.ADMIN
+            and user.role == UserRole.ADMIN
+            and user.status == UserStatus.ACTIVE
+            and self._active_admin_count() <= 1
+        ):
+            raise AccountProtectionError("last_active_admin_cannot_be_downgraded")
         user.role = role
         self.record_audit(
             action="user.change_role",
@@ -369,6 +402,33 @@ class AuthService:
         self.session.flush()
         return LoginResult(user=user, session=user_session, raw_token=raw_token)
 
+    def _load_user(self, username: str) -> User | None:
+        statement = select(User).where(User.username == username)
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        return self.session.scalar(statement)
+
+    def _load_user_by_id(self, user_id: int) -> User | None:
+        statement = select(User).where(User.id == user_id)
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        return self.session.scalar(statement)
+
+    def _active_admin_count(self) -> int:
+        statement = select(User.id).where(
+            User.role == UserRole.ADMIN,
+            User.status == UserStatus.ACTIVE,
+        )
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        return len(self.session.scalars(statement).all())
+
+    def _verify_dummy_password(self, password: str) -> None:
+        try:
+            self.password_hasher.verify(DUMMY_PASSWORD_HASH, password)
+        except (VerifyMismatchError, VerificationError):
+            pass
+
     def _audit_login_failure(self, username: str, reason: str) -> None:
         username_digest = hashlib.sha256(username.encode("utf-8")).hexdigest()[:16]
         self.record_audit(
@@ -383,4 +443,11 @@ class AuthService:
             update(UserSession)
             .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
             .values(revoked_at=datetime.now(UTC))
+        )
+
+    @property
+    def _supports_row_locks(self) -> bool:
+        return (
+            self.session.bind is not None
+            and self.session.bind.dialect.name == "postgresql"
         )

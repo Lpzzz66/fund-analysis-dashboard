@@ -9,7 +9,11 @@ from app.config import get_settings
 from app.db.base import SourceType
 from app.db.models import AuditLog, SourceFile
 from app.imports.service import ImportService
-from app.imports.storage import UnsafeStoragePathError, resolve_in_root
+from app.imports.storage import (
+    InvalidFileError,
+    UnsafeStoragePathError,
+    resolve_in_root,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -125,6 +129,95 @@ def test_upload_size_limit_is_enforced(app_and_engine: tuple[object, object]) ->
             service.receive_upload(
                 batch.id, "large.xlsx", BytesIO(make_xlsx_bytes(b"x" * 100)), actor.id
             )
+
+
+def test_xlsx_member_count_limit_is_enforced(
+    app_and_engine: tuple[object, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, engine = app_and_engine
+    monkeypatch.setattr("app.imports.storage.MAX_XLSX_MEMBERS", 2)
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+
+        with pytest.raises(InvalidFileError):
+            service.receive_upload(
+                batch.id, "too-many-members.xlsx", BytesIO(make_xlsx_bytes()), actor.id
+            )
+
+
+def test_xlsx_uncompressed_size_limit_is_enforced(
+    app_and_engine: tuple[object, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, engine = app_and_engine
+    monkeypatch.setattr("app.imports.storage.MAX_XLSX_UNCOMPRESSED_BYTES", 32)
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+
+        with pytest.raises(InvalidFileError):
+            service.receive_upload(
+                batch.id,
+                "too-large-uncompressed.xlsx",
+                BytesIO(make_xlsx_bytes(b"x" * 100)),
+                actor.id,
+            )
+
+
+def test_complete_batch_is_idempotent_for_queued_and_completed_batches(
+    app_and_engine: tuple[object, object],
+) -> None:
+    app, engine = app_and_engine
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+        service.receive_upload(
+            batch.id, "valuation.xlsx", BytesIO(make_xlsx_bytes()), actor.id
+        )
+
+        first_batch, first_job = service.complete_batch(batch.id, actor.id)
+        second_batch, second_job = service.complete_batch(batch.id, actor.id)
+
+        assert first_batch.status == "queued"
+        assert second_batch.status == "queued"
+        assert second_job.id == first_job.id
+
+        first_batch.status = "completed"
+        first_job.status = "succeeded"
+        session.flush()
+        completed_batch, completed_job = service.complete_batch(batch.id, actor.id)
+        session.commit()
+
+        assert completed_batch.status == "completed"
+        assert completed_job.id == first_job.id
+
+
+def test_complete_batch_does_not_reset_failed_batch(
+    app_and_engine: tuple[object, object],
+) -> None:
+    app, engine = app_and_engine
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+        service.receive_upload(
+            batch.id, "valuation.xlsx", BytesIO(make_xlsx_bytes()), actor.id
+        )
+        _, job = service.complete_batch(batch.id, actor.id)
+        batch.status = "failed"
+        session.commit()
+
+        with pytest.raises(ValueError, match="batch_failed"):
+            service.complete_batch(batch.id, actor.id)
+
+        session.rollback()
+        refreshed = session.get(type(batch), batch.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert session.get(type(job), job.id).status == "pending"
 
 
 def test_storage_path_cannot_escape_root(tmp_path: Path) -> None:

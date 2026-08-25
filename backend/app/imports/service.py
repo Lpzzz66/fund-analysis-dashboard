@@ -84,9 +84,7 @@ class ImportService:
         stream: BinaryIO,
         actor_user_id: int | None,
     ) -> UploadResult:
-        batch = self.session.get(ImportBatch, batch_id)
-        if batch is None:
-            raise LookupError(batch_id)
+        batch = self._get_batch(batch_id, lock=True)
         if batch.status != ImportBatchStatus.CREATED:
             self._record_audit(
                 action="import.upload_failed",
@@ -177,9 +175,36 @@ class ImportService:
     def complete_batch(
         self, batch_id: int, actor_user_id: int | None
     ) -> tuple[ImportBatch, BackgroundJob]:
-        batch = self.session.get(ImportBatch, batch_id)
-        if batch is None:
-            raise LookupError(batch_id)
+        batch = self._get_batch(batch_id, lock=True)
+        status = ImportBatchStatus(batch.status)
+        if status == ImportBatchStatus.FAILED:
+            self._record_audit(
+                action="import.complete_failed",
+                batch_id=batch.id,
+                actor_user_id=actor_user_id,
+                result=AuditResult.FAILURE,
+                summary={"error_code": "batch_failed"},
+            )
+            self.session.flush()
+            raise ValueError("batch_failed")
+
+        job = self.session.scalar(
+            select(BackgroundJob).where(
+                BackgroundJob.job_type == "process_import_batch",
+                BackgroundJob.resource_id == str(batch.id),
+            )
+        )
+        if status in {
+            ImportBatchStatus.QUEUED,
+            ImportBatchStatus.PROCESSING,
+            ImportBatchStatus.COMPLETED,
+        }:
+            if job is None:
+                raise ValueError("batch_job_missing")
+            return batch, job
+
+        if status != ImportBatchStatus.CREATED:
+            raise ValueError("invalid_batch_status")
         if batch.file_count == 0:
             self._record_audit(
                 action="import.complete_failed",
@@ -191,12 +216,6 @@ class ImportService:
             self.session.flush()
             raise ValueError("empty_batch")
 
-        job = self.session.scalar(
-            select(BackgroundJob).where(
-                BackgroundJob.job_type == "process_import_batch",
-                BackgroundJob.resource_id == str(batch.id),
-            )
-        )
         if job is None:
             job = BackgroundJob(
                 job_type="process_import_batch",
@@ -214,7 +233,17 @@ class ImportService:
         return batch, job
 
     def get_batch(self, batch_id: int) -> ImportBatch:
-        batch = self.session.get(ImportBatch, batch_id)
+        return self._get_batch(batch_id)
+
+    def _get_batch(self, batch_id: int, *, lock: bool = False) -> ImportBatch:
+        statement = select(ImportBatch).where(ImportBatch.id == batch_id)
+        if (
+            lock
+            and self.session.bind is not None
+            and self.session.bind.dialect.name == "postgresql"
+        ):
+            statement = statement.with_for_update()
+        batch = self.session.scalar(statement)
         if batch is None:
             raise LookupError(batch_id)
         return batch

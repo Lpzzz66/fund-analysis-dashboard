@@ -7,7 +7,7 @@ from alembic.config import Config
 from app.db.base import Base
 from app.db.models import Fund, FundDailySnapshot, ValuationVersion
 from app.db.session import create_engine
-from sqlalchemy import Float, Numeric, select, text
+from sqlalchemy import Float, Numeric, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -218,7 +218,8 @@ def test_alembic_upgrade_creates_initial_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database_path = tmp_path / "migration.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{database_path.as_posix()}")
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("APP_ENV", "development")
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
 
@@ -246,6 +247,7 @@ def test_initial_migration_downgrade_preserves_existing_data(
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
 
     command.upgrade(config, "head")
+
     migrated_engine = create_engine(database_url)
     with migrated_engine.begin() as connection:
         connection.execute(
@@ -262,3 +264,41 @@ def test_initial_migration_downgrade_preserves_existing_data(
         )
 
     command.upgrade(config, "head")
+
+
+def test_job_lease_index_migration_is_reversible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "job-lease-migration.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("APP_ENV", "development")
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+
+    command.upgrade(config, "0003_import_job_lease")
+    migrated_engine = create_engine(database_url)
+    with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert "lease_token" in {
+            column["name"] for column in inspector.get_columns("background_job")
+        }
+        assert "ix_background_job_claim" not in {
+            index["name"] for index in inspector.get_indexes("background_job")
+        }
+
+    command.upgrade(config, "head")
+    with migrated_engine.connect() as connection:
+        assert "ix_background_job_claim" in {
+            index["name"] for index in inspect(connection).get_indexes("background_job")
+        }
+
+    command.downgrade(config, "0003_import_job_lease")
+    with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert "ix_background_job_claim" not in {
+            index["name"] for index in inspector.get_indexes("background_job")
+        }
+        assert "lease_token" in {
+            column["name"] for column in inspector.get_columns("background_job")
+        }
+    migrated_engine.dispose()

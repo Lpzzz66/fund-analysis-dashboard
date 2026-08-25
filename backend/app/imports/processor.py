@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -24,10 +24,11 @@ from app.db.models import (
     ShareClass,
     ShareClassDailySnapshot,
     SourceFile,
+    SubjectMapping,
     ValuationVersion,
 )
 from app.parser import ValuationParser
-from app.parser.interface import ParsedShareClass, ParsedValuation
+from app.parser.interface import ParsedShareClass, ParsedSubject, ParsedValuation
 from app.parser.valuation_parser import ParseError
 from app.validation import ValidationService
 
@@ -75,6 +76,7 @@ def process_import_batch(
     session.flush()
 
     aliases = _product_aliases(session)
+    mappings = _subject_mappings(session)
     parser = ValuationParser(aliases)
     links = tuple(
         session.scalars(
@@ -154,7 +156,13 @@ def process_import_batch(
             )
             continue
 
-        version = _persist_parsed_version(session, fund, source_file, parsed)
+        version = _persist_parsed_version(
+            session,
+            fund,
+            source_file,
+            parsed,
+            mappings=_active_mappings(mappings, parsed.valuation_date),
+        )
         report = ValidationService(session).validate_version(version.id, parsed=parsed)
         if report.critical_count:
             counters["review"] += 1
@@ -201,12 +209,70 @@ def _resolve_fund(session: Session, product_name: str | None) -> Fund | None:
     return None
 
 
+def _subject_mappings(session: Session) -> tuple[SubjectMapping, ...]:
+    """Load active subject rules once per batch in deterministic order."""
+
+    return tuple(
+        session.scalars(
+            select(SubjectMapping)
+            .where(SubjectMapping.status == "active")
+            .order_by(SubjectMapping.id)
+        ).all()
+    )
+
+
+def _active_mappings(
+    mappings: tuple[SubjectMapping, ...], valuation_date: date | None
+) -> tuple[SubjectMapping, ...]:
+    if valuation_date is None:
+        return mappings
+    return tuple(
+        item
+        for item in mappings
+        if (item.valid_from is None or item.valid_from <= valuation_date)
+        and (item.valid_to is None or valuation_date <= item.valid_to)
+    )
+
+
+def _match_subject_mapping(
+    item: ParsedSubject, mappings: tuple[SubjectMapping, ...]
+) -> SubjectMapping | None:
+    code = item.code.strip().casefold()
+    name = item.name.strip().casefold()
+    candidates = [
+        mapping
+        for mapping in mappings
+        if (
+            mapping.subject_code_or_prefix
+            and code.startswith(mapping.subject_code_or_prefix.strip().casefold())
+        )
+        or (
+            mapping.raw_name_pattern
+            and mapping.raw_name_pattern.strip().casefold() in name
+        )
+    ]
+    candidates.sort(
+        key=lambda mapping: (
+            -len(mapping.subject_code_or_prefix or ""),
+            -len(mapping.raw_name_pattern or ""),
+            mapping.id,
+        )
+    )
+    return candidates[0] if candidates else None
+
+
 def _persist_parsed_version(
     session: Session,
     fund: Fund,
     source_file: SourceFile,
     parsed: ParsedValuation,
+    *,
+    mappings: tuple[SubjectMapping, ...] = (),
 ) -> ValuationVersion:
+    fund_lock = select(Fund.id).where(Fund.id == fund.id)
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        fund_lock = fund_lock.with_for_update()
+    session.scalar(fund_lock)
     version_no = (
         session.scalar(
             select(func.max(ValuationVersion.version_no)).where(
@@ -256,24 +322,28 @@ def _persist_parsed_version(
         )
         for item in parsed.provenance
     )
-    session.add_all(
-        AccountSubjectDaily(
-            valuation_version_id=version.id,
-            raw_subject_code=item.code,
-            raw_subject_name=item.name,
-            hierarchy_path="/".join((*item.hierarchy_path, item.code)),
-            is_leaf=item.is_leaf,
-            include_in_holdings=False,
-            quantity=item.quantity,
-            cost=item.cost,
-            market_value=item.market_value,
-            cost_weight=item.cost_weight,
-            market_value_weight=item.market_value_weight,
-            valuation_gain=item.valuation_gain,
-            suspension_info=item.suspension_info,
+    subject_rows: list[AccountSubjectDaily] = []
+    for item in parsed.subjects:
+        mapping = _match_subject_mapping(item, mappings)
+        subject_rows.append(
+            AccountSubjectDaily(
+                valuation_version_id=version.id,
+                raw_subject_code=item.code,
+                raw_subject_name=item.name,
+                standard_category=mapping.standard_category if mapping else None,
+                hierarchy_path="/".join((*item.hierarchy_path, item.code)),
+                is_leaf=item.is_leaf,
+                include_in_holdings=mapping.include_in_holdings if mapping else False,
+                quantity=item.quantity,
+                cost=item.cost,
+                market_value=item.market_value,
+                cost_weight=item.cost_weight,
+                market_value_weight=item.market_value_weight,
+                valuation_gain=item.valuation_gain,
+                suspension_info=item.suspension_info,
+            )
         )
-        for item in parsed.subjects
-    )
+    session.add_all(subject_rows)
     session.add_all(
         PositionDaily(
             valuation_version_id=version.id,

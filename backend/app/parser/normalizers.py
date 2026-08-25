@@ -20,17 +20,22 @@ def decimal(value: Any) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, Decimal):
-        return value
+        return value if value.is_finite() else None
     if isinstance(value, int | float):
-        return Decimal(str(value))
+        try:
+            parsed = Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            return None
+        return parsed if parsed.is_finite() else None
     raw = text(value).replace(",", "").replace("，", "")
     if not raw or raw in {"-", "--", "N/A", "NA", "无"}:
         return None
     raw = raw.removesuffix("%")
     try:
-        return Decimal(raw)
-    except InvalidOperation:
+        parsed = Decimal(raw)
+    except (InvalidOperation, ValueError):
         return None
+    return parsed if parsed.is_finite() else None
 
 
 def ratio(value: Any) -> Decimal | None:

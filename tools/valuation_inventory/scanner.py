@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -49,11 +51,54 @@ class ScanResult:
 def iter_rel_files(root: Path) -> list[str]:
     """递归枚举 root 下所有文件的相对 POSIX 路径，按路径排序（确定性）。"""
     rels: list[str] = []
-    for p in root.rglob("*"):
-        if p.is_file():
-            rels.append(p.relative_to(root).as_posix())
+    for current, dir_names, file_names in os.walk(
+        root, topdown=True, followlinks=False
+    ):
+        current_path = Path(current)
+        dir_names[:] = [
+            name for name in dir_names if not _is_link_like(current_path / name)
+        ]
+        for name in file_names:
+            path = current_path / name
+            if not _is_link_like(path) and path.is_file():
+                rels.append(path.relative_to(root).as_posix())
     rels.sort()
     return rels
+
+
+def _is_link_like(path: Path) -> bool:
+    """识别符号链接与 Windows 连接点，避免遍历或读取其目标。"""
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction is not None and is_junction())
+
+
+def _path_error(root: Path, rel: str, message: str) -> FileInfo:
+    rel_parts = rel.split("/")
+    file_name = rel_parts[-1]
+    return FileInfo(
+        rel_path=rel,
+        file_name=file_name,
+        ext=Path(file_name).suffix.lower(),
+        size_bytes=-1,
+        mtime="",
+        zone=zone_of(rel_parts),
+        parse_status=ParseStatus.FAILED,
+        error_type=ErrorType.READ_ERROR,
+        error_message=redact_error(message, root),
+    )
+
+
+def _resolve_inside_root(root: Path, rel: str) -> Path | None:
+    path = root / rel
+    if _is_link_like(path):
+        return None
+    resolved_root = root.resolve()
+    resolved_path = path.resolve(strict=False)
+    if not resolved_path.is_relative_to(resolved_root):
+        return None
+    return resolved_path
 
 
 def zone_of(rel_parts: list[str]) -> SourceZone:
@@ -117,10 +162,16 @@ def scan_file(
     root: Path, rel: str, options: ScanOptions, catalog: em.ProductCatalog
 ) -> FileInfo:
     """扫描单个文件：stat → 哈希 → （可选）Excel 内容解析。异常全部就地记录。"""
-    path = root / rel
     rel_parts = rel.split("/")
     file_name = rel_parts[-1]
     ext = Path(file_name).suffix.lower()
+
+    try:
+        path = _resolve_inside_root(root, rel)
+    except (OSError, RuntimeError) as e:
+        return _path_error(root, rel, f"path validation failed: {e}")
+    if path is None:
+        return _path_error(root, rel, "path is a link or escapes scan root")
 
     try:
         st = path.stat()
@@ -158,12 +209,13 @@ def scan_file(
         info.error_message = redact_error(f"hash failed: {e}", root)
         return info
 
-    _parse_excel_metadata(info, root, rel_parts, options, catalog)
+    _parse_excel_metadata(info, path, root, rel_parts, options, catalog)
     return info
 
 
 def _parse_excel_metadata(
     info: FileInfo,
+    path: Path,
     root: Path,
     rel_parts: list[str],
     options: ScanOptions,
@@ -181,7 +233,6 @@ def _parse_excel_metadata(
         info.error_message = "skipped: --no-parse-xls"
         return
 
-    path = root / info.rel_path
     try:
         grids = em.load_grids(path)
         facts = em.analyze_grids(grids)
@@ -266,13 +317,15 @@ def scan(
     catalog = catalog or em.ProductCatalog()
     rels = iter_rel_files(root)
     done = 0
+    progress_lock = threading.Lock()
 
     def _one(rel: str) -> FileInfo:
         nonlocal done
         info = scan_file(root, rel, options, catalog)
-        done += 1
-        if progress is not None:
-            progress(done, len(rels))
+        with progress_lock:
+            done += 1
+            if progress is not None:
+                progress(done, len(rels))
         return info
 
     if options.workers > 1:
