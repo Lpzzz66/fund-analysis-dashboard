@@ -7,7 +7,7 @@ from alembic.config import Config
 from app.db.base import Base
 from app.db.models import Fund, FundDailySnapshot, ValuationVersion
 from app.db.session import create_engine
-from sqlalchemy import Float, Numeric, select
+from sqlalchemy import Float, Numeric, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -218,9 +218,7 @@ def test_alembic_upgrade_creates_initial_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database_path = tmp_path / "migration.db"
-    monkeypatch.setenv(
-        "DATABASE_URL", f"sqlite+pysqlite:///{database_path.as_posix()}"
-    )
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{database_path.as_posix()}")
     monkeypatch.setenv("APP_ENV", "development")
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
 
@@ -228,9 +226,7 @@ def test_alembic_upgrade_creates_initial_schema(
     command.downgrade(config, "base")
     command.upgrade(config, "head")
 
-    migrated_engine = create_engine(
-        f"sqlite+pysqlite:///{database_path.as_posix()}"
-    )
+    migrated_engine = create_engine(f"sqlite+pysqlite:///{database_path.as_posix()}")
     with migrated_engine.connect() as connection:
         table_names = set(
             connection.exec_driver_sql(
@@ -238,3 +234,31 @@ def test_alembic_upgrade_creates_initial_schema(
             ).scalars()
         )
     assert set(Base.metadata.tables).issubset(table_names)
+
+
+def test_initial_migration_downgrade_preserves_existing_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "non-destructive-migration.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("APP_ENV", "development")
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+
+    command.upgrade(config, "head")
+    migrated_engine = create_engine(database_url)
+    with migrated_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO fund (standard_name, status) VALUES ('保留产品', 'active')"
+            )
+        )
+
+    command.downgrade(config, "base")
+    with migrated_engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT standard_name FROM fund")).scalar_one()
+            == "保留产品"
+        )
+
+    command.upgrade(config, "head")

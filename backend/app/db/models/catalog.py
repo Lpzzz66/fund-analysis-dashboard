@@ -50,7 +50,9 @@ class Fund(Base):
     establishment_date: Mapped[date | None] = mapped_column(Date)
     strategy: Mapped[str | None] = mapped_column(String(255))
     manager: Mapped[str | None] = mapped_column(String(255))
-    status: Mapped[str] = enum_column(FundStatus, nullable=False, default=FundStatus.ACTIVE)
+    status: Mapped[str] = enum_column(
+        FundStatus, nullable=False, default=FundStatus.ACTIVE
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()
@@ -86,7 +88,9 @@ class FundAlias(Base):
 
 class ShareClass(Base):
     __tablename__ = "share_class"
-    __table_args__ = (UniqueConstraint("fund_id", "share_code", name="uq_share_class_code"),)
+    __table_args__ = (
+        UniqueConstraint("fund_id", "share_code", name="uq_share_class_code"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     fund_id: Mapped[int] = mapped_column(
@@ -123,7 +127,9 @@ class SubjectMapping(Base):
 class ParserRuleSet(Base):
     __tablename__ = "parser_rule_set"
     __table_args__ = (
-        UniqueConstraint("template_identifier", "version", name="uq_parser_rule_version"),
+        UniqueConstraint(
+            "template_identifier", "version", name="uq_parser_rule_version"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -63,7 +64,9 @@ class ImportService:
             max_file_size=settings.max_upload_bytes,
         )
 
-    def create_batch(self, source_type: SourceType, actor_user_id: int | None) -> ImportBatch:
+    def create_batch(
+        self, source_type: SourceType, actor_user_id: int | None
+    ) -> ImportBatch:
         batch = ImportBatch(
             source_type=source_type,
             created_by_user_id=actor_user_id,
@@ -129,28 +132,46 @@ class ImportService:
             return UploadResult(source_file=existing_file, duplicate=True)
 
         object_name, stored_path = store_staged_upload(staged, self.storage_dir)
+        source_file = SourceFile(
+            original_filename=staged.original_filename,
+            file_hash=staged.file_hash,
+            file_size=staged.file_size,
+            file_extension=staged.extension,
+            source_type=batch.source_type,
+            object_name=object_name,
+        )
         try:
-            source_file = SourceFile(
-                original_filename=staged.original_filename,
-                file_hash=staged.file_hash,
-                file_size=staged.file_size,
-                file_extension=staged.extension,
-                source_type=batch.source_type,
-                object_name=object_name,
+            with self.session.begin_nested():
+                self.session.add(source_file)
+                self.session.flush()
+        except IntegrityError:
+            existing_file = self.session.scalar(
+                select(SourceFile).where(SourceFile.file_hash == staged.file_hash)
             )
-            self.session.add(source_file)
-            self.session.flush()
-            self._link_file(batch, source_file, duplicate=False)
+            if existing_file is None:
+                remove_stored_object(stored_path, self.storage_dir)
+                raise
+            remove_stored_object(stored_path, self.storage_dir)
+            self._link_file(batch, existing_file, duplicate=True)
             self._record_audit(
-                action="import.upload",
+                action="import.duplicate_file",
                 batch_id=batch.id,
                 actor_user_id=actor_user_id,
-                summary={"source_file_id": source_file.id},
+                summary={"source_file_id": existing_file.id},
             )
             self.session.flush()
+            return UploadResult(source_file=existing_file, duplicate=True)
         except Exception:
             remove_stored_object(stored_path, self.storage_dir)
             raise
+        self._link_file(batch, source_file, duplicate=False)
+        self._record_audit(
+            action="import.upload",
+            batch_id=batch.id,
+            actor_user_id=actor_user_id,
+            summary={"source_file_id": source_file.id},
+        )
+        self.session.flush()
         return UploadResult(source_file=source_file, duplicate=False)
 
     def complete_batch(

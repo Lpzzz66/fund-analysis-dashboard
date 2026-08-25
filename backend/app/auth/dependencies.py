@@ -28,14 +28,19 @@ def get_db(request: Request) -> Iterator[Session]:
 
 
 def get_auth_context(
-    request: Request, session: Session = Depends(get_db)  # noqa: B008
+    request: Request,
+    session: Session = Depends(get_db),  # noqa: B008
 ) -> AuthContext:
     raw_token = request.cookies.get(SESSION_COOKIE_NAME)
     if not raw_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+        )
     authenticated = AuthService(session).authenticate_session(raw_token)
     if authenticated is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+        )
     user, user_session = authenticated
     return AuthContext(user=user, session=user_session)
 
@@ -47,7 +52,9 @@ def require_roles(*roles: UserRole) -> Callable[[AuthContext], AuthContext]:
         context: AuthContext = Depends(get_auth_context),  # noqa: B008
     ) -> AuthContext:
         if context.user.role not in allowed_roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+            )
         return context
 
     return dependency

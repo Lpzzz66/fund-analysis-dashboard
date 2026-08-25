@@ -8,8 +8,14 @@ from app.analytics.nav import calculate_nav_series
 def test_nav_series_sorts_dates_and_calculates_cumulative_return() -> None:
     result = calculate_nav_series(
         [
-            {"valuation_date": date(2026, 1, 2), "cumulative_unit_nav": Decimal("1.10")},
-            {"valuation_date": date(2026, 1, 1), "cumulative_unit_nav": Decimal("1.00")},
+            {
+                "valuation_date": date(2026, 1, 2),
+                "cumulative_unit_nav": Decimal("1.10"),
+            },
+            {
+                "valuation_date": date(2026, 1, 1),
+                "cumulative_unit_nav": Decimal("1.00"),
+            },
         ]
     )
 
@@ -25,8 +31,16 @@ def test_nav_series_sorts_dates_and_calculates_cumulative_return() -> None:
 def test_nav_series_adjusts_unit_nav_with_cumulative_payout() -> None:
     result = calculate_nav_series(
         [
-            {"date": date(2026, 1, 1), "unit_nav": Decimal("1.00"), "cumulative_payout": Decimal(0)},
-            {"date": date(2026, 1, 2), "unit_nav": Decimal("1.10"), "cumulative_payout": Decimal("0.10")},
+            {
+                "date": date(2026, 1, 1),
+                "unit_nav": Decimal("1.00"),
+                "cumulative_payout": Decimal(0),
+            },
+            {
+                "date": date(2026, 1, 2),
+                "unit_nav": Decimal("1.10"),
+                "cumulative_payout": Decimal("0.10"),
+            },
         ]
     )
 

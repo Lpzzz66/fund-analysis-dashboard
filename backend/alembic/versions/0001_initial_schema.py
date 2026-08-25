@@ -17,6 +17,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove the schema owned by this initial migration."""
+    """Keep the initial schema during downgrade to avoid destructive data loss.
 
-    Base.metadata.drop_all(bind=op.get_bind())
+    The initial migration predates a table-by-table rollback history. Removing all
+    tables here would silently destroy source files, published valuations, and
+    audit logs, so production rollback must use an explicit forward migration.
+    """

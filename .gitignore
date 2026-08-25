@@ -31,6 +31,9 @@ tmp/
 data/
 uploads/
 backups/
+tmp-audit-*.db
+tmp-audit-migration/
+tmp-batch-*.db
 
 # IDE and OS files
 .idea/
@@ -38,4 +41,3 @@ backups/
 *.swp
 Thumbs.db
 Desktop.ini
-

@@ -95,9 +95,11 @@ def initialize(
             payload.username, payload.password, payload.display_name
         )
         session.commit()
-    except AuthService.InitializationClosed as exc:
+    except (AuthService.InitializationClosed, IntegrityError) as exc:
         session.rollback()
-        raise HTTPException(status_code=409, detail="Initialization already completed") from exc
+        raise HTTPException(
+            status_code=409, detail="Initialization already completed"
+        ) from exc
     _set_session_cookie(request, response, login.raw_token)
     return {"data": _user_data(login.user)}
 
@@ -119,7 +121,9 @@ def login(
         session.commit()
     except AuthService.InvalidCredentials as exc:
         session.commit()
-        raise HTTPException(status_code=401, detail="Invalid username or password") from exc
+        raise HTTPException(
+            status_code=401, detail="Invalid username or password"
+        ) from exc
     _set_session_cookie(request, response, login_result.raw_token)
     return {"data": _user_data(login_result.user)}
 
@@ -166,7 +170,9 @@ def change_password(
         session.commit()
     except AuthService.InvalidOldPassword as exc:
         session.rollback()
-        raise HTTPException(status_code=400, detail="Current password is incorrect") from exc
+        raise HTTPException(
+            status_code=400, detail="Current password is incorrect"
+        ) from exc
     return {"data": {"changed": True}}
 
 

@@ -63,9 +63,7 @@ def calculate_nav_series(records: list[Any] | tuple[Any, ...]) -> NavSeriesResul
     else:
         has_complete_unit = all(item[1] is not None for item in values)
         methodology = (
-            "unit_nav_plus_cumulative_payout"
-            if has_any_payout
-            else "unit_nav"
+            "unit_nav_plus_cumulative_payout" if has_any_payout else "unit_nav"
         )
         if not has_complete_unit:
             methodology = f"{methodology}_incomplete"
@@ -114,7 +112,9 @@ def calculate_nav_series(records: list[Any] | tuple[Any, ...]) -> NavSeriesResul
     )
 
 
-def calculate_cumulative_return(records: list[Any] | tuple[Any, ...]) -> NavSeriesResult:
+def calculate_cumulative_return(
+    records: list[Any] | tuple[Any, ...],
+) -> NavSeriesResult:
     """Compatibility name for callers interested in the complete NAV result."""
 
     return calculate_nav_series(records)

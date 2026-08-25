@@ -21,7 +21,7 @@ from .imports import (
     SourceFile,
     SourceMessage,
 )
-from .security import AuditLog, User, UserSession
+from .security import AuditLog, SystemState, User, UserSession
 from .valuation import (
     AccountSubjectDaily,
     FieldProvenance,
@@ -54,6 +54,7 @@ __all__ = [
     "SourceFile",
     "SourceMessage",
     "SubjectMapping",
+    "SystemState",
     "User",
     "UserSession",
     "ValidationResult",

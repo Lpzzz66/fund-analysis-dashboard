@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 def test_initialize_first_admin_and_reject_second(client: TestClient) -> None:
     first = client.post(
         "/api/v1/auth/initialize",
-        json={"username": "admin", "password": "correct horse", "display_name": "管理员"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "display_name": "管理员",
+        },
     )
     second = client.post(
         "/api/v1/auth/initialize",

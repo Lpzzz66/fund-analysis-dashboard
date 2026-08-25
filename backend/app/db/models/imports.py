@@ -30,10 +30,14 @@ class SourceMessage(Base):
     __tablename__ = "source_message"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    external_message_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    external_message_id: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False
+    )
     sender: Mapped[str] = mapped_column(String(255), nullable=False)
     subject: Mapped[str | None] = mapped_column(String(500))
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     sync_batch: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = created_at_column()
 
@@ -83,7 +87,9 @@ class ImportBatch(Base):
 class ImportBatchFile(Base):
     __tablename__ = "import_batch_file"
     __table_args__ = (
-        UniqueConstraint("batch_id", "source_file_id", name="uq_import_batch_source_file"),
+        UniqueConstraint(
+            "batch_id", "source_file_id", name="uq_import_batch_source_file"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

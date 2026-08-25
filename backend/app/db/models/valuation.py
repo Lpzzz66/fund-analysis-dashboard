@@ -87,7 +87,9 @@ class ValidationResult(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
-        ForeignKey("valuation_version.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("valuation_version.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     rule_code: Mapped[str] = mapped_column(String(100), nullable=False)
     level: Mapped[str] = enum_column(ValidationLevel, nullable=False)
@@ -104,7 +106,9 @@ class FieldProvenance(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
-        ForeignKey("valuation_version.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("valuation_version.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     standard_field: Mapped[str] = mapped_column(String(255), nullable=False)
     source_worksheet: Mapped[str | None] = mapped_column(String(255))
@@ -116,7 +120,9 @@ class FieldProvenance(Base):
 
 class FundDailySnapshot(Base):
     __tablename__ = "fund_daily_snapshot"
-    __table_args__ = (UniqueConstraint("valuation_version_id", name="uq_fund_snapshot_version"),)
+    __table_args__ = (
+        UniqueConstraint("valuation_version_id", name="uq_fund_snapshot_version"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
@@ -146,13 +152,17 @@ class ShareClassDailySnapshot(Base):
     __tablename__ = "share_class_daily_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "valuation_version_id", "share_class_id", name="uq_share_snapshot_version_class"
+            "valuation_version_id",
+            "share_class_id",
+            name="uq_share_snapshot_version_class",
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
-        ForeignKey("valuation_version.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("valuation_version.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     share_class_id: Mapped[int] = mapped_column(
         ForeignKey("share_class.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -174,14 +184,18 @@ class AccountSubjectDaily(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
-        ForeignKey("valuation_version.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("valuation_version.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     raw_subject_code: Mapped[str | None] = mapped_column(String(100))
     raw_subject_name: Mapped[str] = mapped_column(String(255), nullable=False)
     standard_category: Mapped[str | None] = mapped_column(String(100))
     hierarchy_path: Mapped[str | None] = mapped_column(String(1000))
     is_leaf: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    include_in_holdings: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    include_in_holdings: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     market_value: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
@@ -196,7 +210,9 @@ class PositionDaily(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     valuation_version_id: Mapped[int] = mapped_column(
-        ForeignKey("valuation_version.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("valuation_version.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     security_code: Mapped[str] = mapped_column(String(100), nullable=False)
     security_name: Mapped[str | None] = mapped_column(String(255))

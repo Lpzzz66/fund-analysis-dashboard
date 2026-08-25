@@ -47,20 +47,29 @@ def calculate_concentration(
             continue
         name = field(position, "security_name", "name")
         current_name, current_value = grouped.get(code, (None, Decimal(0)))
-        grouped[code] = (current_name or (str(name).strip() if name else None), current_value + market_value)
+        grouped[code] = (
+            current_name or (str(name).strip() if name else None),
+            current_value + market_value,
+        )
 
     total_market_value = sum((value for _, value in grouped.values()), Decimal(0))
-    denominator = decimal(net_asset_value) if net_asset_value is not None else total_market_value
+    denominator = (
+        decimal(net_asset_value) if net_asset_value is not None else total_market_value
+    )
     result_positions = [
         PositionWeight(
             security_code=code,
             security_name=name,
             market_value=market_value,
-            weight=None if denominator in (None, Decimal(0)) else market_value / denominator,
+            weight=None
+            if denominator in (None, Decimal(0))
+            else market_value / denominator,
         )
         for code, (name, market_value) in grouped.items()
     ]
-    result_positions.sort(key=lambda item: (-abs(item.market_value), item.security_code))
+    result_positions.sort(
+        key=lambda item: (-abs(item.market_value), item.security_code)
+    )
     absolute_weights = [
         abs(item.weight) for item in result_positions if item.weight is not None
     ]

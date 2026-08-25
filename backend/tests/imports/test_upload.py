@@ -31,7 +31,9 @@ def test_upload_uses_random_object_name_and_hash(
         )
         session.commit()
 
-        stored_path = Path(app.state.settings.source_storage_dir) / result.source_file.object_name
+        stored_path = (
+            Path(app.state.settings.source_storage_dir) / result.source_file.object_name
+        )
         assert result.duplicate is False
         assert result.source_file.file_hash == sha256(content).hexdigest()
         assert result.source_file.object_name != "估值表.xlsx"

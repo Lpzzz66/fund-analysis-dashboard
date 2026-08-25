@@ -20,7 +20,9 @@ def test_asset_allocation_aggregates_categories_and_uses_nav_denominator() -> No
     }
 
 
-def test_position_concentration_merges_accounts_and_calculates_top_five_and_hhi() -> None:
+def test_position_concentration_merges_accounts_and_calculates_top_five_and_hhi() -> (
+    None
+):
     result = calculate_concentration(
         [
             {"security_code": "A", "security_name": "甲", "market_value": Decimal(20)},

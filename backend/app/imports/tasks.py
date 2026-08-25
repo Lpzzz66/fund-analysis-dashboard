@@ -7,8 +7,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.base import JobStatus
-from app.db.models import BackgroundJob
+from app.config import Settings
+from app.db.base import ImportBatchStatus, JobStatus
+from app.db.models import BackgroundJob, ImportBatch
+
+from .processor import BatchProcessResult, process_import_batch
 
 
 def claim_next_job(
@@ -81,3 +84,42 @@ def fail_job(
         job.next_retry_at = None
         job.finished_at = current_time
     session.flush()
+
+
+def process_next_job(
+    session: Session, settings: Settings
+) -> tuple[BackgroundJob, BatchProcessResult | None] | None:
+    """Claim and execute one import job, converting failures to stable states."""
+
+    job = claim_next_job(session)
+    if job is None:
+        return None
+    try:
+        if job.job_type != "process_import_batch":
+            raise ValueError("unsupported_job_type")
+        result = process_import_batch(session, int(job.resource_id), settings)
+        finish_job(session, job)
+        session.commit()
+        return job, result
+    except ValueError:
+        session.rollback()
+        refreshed = session.get(BackgroundJob, job.id)
+        if refreshed is None:
+            raise
+        fail_job(session, refreshed, "batch_processing_failed", retryable=False)
+        batch = session.get(ImportBatch, int(job.resource_id))
+        if batch is not None:
+            batch.status = ImportBatchStatus.FAILED
+        session.commit()
+        return refreshed, None
+    except Exception:
+        session.rollback()
+        refreshed = session.get(BackgroundJob, job.id)
+        if refreshed is None:
+            raise
+        fail_job(session, refreshed, "batch_processing_failed", retryable=True)
+        batch = session.get(ImportBatch, int(job.resource_id))
+        if batch is not None:
+            batch.status = ImportBatchStatus.FAILED
+        session.commit()
+        return refreshed, None

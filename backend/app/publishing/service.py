@@ -1,0 +1,550 @@
+"""Transactional review and publication workflow for valuation versions."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
+
+from sqlalchemy import event, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.db.base import (
+    AnalysisRunStatus,
+    AuditResult,
+    ValidationLevel,
+    ValuationStatus,
+    utcnow,
+)
+from app.db.models import (
+    AccountSubjectDaily,
+    AnalysisRun,
+    AuditLog,
+    FieldProvenance,
+    Fund,
+    FundDailySnapshot,
+    PositionDaily,
+    ShareClassDailySnapshot,
+    ValidationResult,
+    ValuationVersion,
+)
+
+
+class PublishingServiceError(RuntimeError):
+    """Stable domain error that does not expose database implementation details."""
+
+
+class PublishingStateError(PublishingServiceError):
+    """The requested workflow action is invalid for the current version state."""
+
+
+class PublishingValidationError(PublishingServiceError):
+    """Validation or review requirements have not been satisfied."""
+
+
+class PublishingConflictError(PublishingServiceError):
+    """A concurrent publication prevented the requested action."""
+
+
+class PublishedVersionImmutableError(PublishingServiceError):
+    """Standardized details belonging to a released version cannot be edited."""
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationResult:
+    version_id: int
+    fund_id: int
+    valuation_date: date
+    superseded_version_ids: tuple[int, ...]
+    analysis_run_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewResult:
+    version_id: int
+    status: ValuationStatus
+
+
+IMMUTABLE_DETAIL_TYPES = (
+    AccountSubjectDaily,
+    FieldProvenance,
+    FundDailySnapshot,
+    PositionDaily,
+    ShareClassDailySnapshot,
+    ValidationResult,
+)
+IMMUTABLE_VERSION_STATUSES = {
+    ValuationStatus.PUBLISHED,
+    ValuationStatus.SUPERSEDED,
+    ValuationStatus.REVOKED,
+}
+
+
+@event.listens_for(Session, "before_flush")
+def _protect_released_version_details(
+    session: Session, _flush_context: object, _instances: object
+) -> None:
+    """Reject ORM updates and deletes of released valuation details."""
+
+    candidates = tuple(session.new) + tuple(session.dirty) + tuple(session.deleted)
+    for item in candidates:
+        if not isinstance(item, IMMUTABLE_DETAIL_TYPES):
+            continue
+        version_id = getattr(item, "valuation_version_id", None)
+        if version_id is None:
+            continue
+        version = session.get(ValuationVersion, version_id)
+        if (
+            version is not None
+            and ValuationStatus(version.status) in IMMUTABLE_VERSION_STATUSES
+        ):
+            raise PublishedVersionImmutableError(
+                "published_version_details_are_immutable"
+            )
+
+
+class PublishingService:
+    """Own valuation review and publication state changes behind one interface."""
+
+    def __init__(self, session: Session, *, methodology_version: str = "v1") -> None:
+        self.session = session
+        self.methodology_version = methodology_version
+
+    def pending_reviews(
+        self, *, fund_id: int | None = None
+    ) -> tuple[ValuationVersion, ...]:
+        statement = (
+            select(ValuationVersion)
+            .where(ValuationVersion.status == ValuationStatus.PENDING_REVIEW)
+            .order_by(ValuationVersion.valuation_date, ValuationVersion.id)
+        )
+        if fund_id is not None:
+            statement = statement.where(ValuationVersion.fund_id == fund_id)
+        return tuple(self.session.scalars(statement).all())
+
+    def complete_review(
+        self,
+        version_id: int,
+        *,
+        approved: bool,
+        actor_user_id: int | None,
+        note: str,
+    ) -> ReviewResult:
+        """Approve a pending review for publication or reject the version."""
+
+        review_note = _required_reason(note, "review_note_required")
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                self._require_status(version, ValuationStatus.PENDING_REVIEW)
+                target_status = (
+                    ValuationStatus.PUBLISHABLE
+                    if approved
+                    else ValuationStatus.REJECTED
+                )
+                version.status = target_status
+                if approved:
+                    version.release_reason = review_note
+                self._audit(
+                    action=(
+                        "valuation.review_approved"
+                        if approved
+                        else "valuation.review_rejected"
+                    ),
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=review_note,
+                    summary={"to_status": target_status.value},
+                )
+                self.session.flush()
+                return ReviewResult(version_id=version.id, status=target_status)
+        except PublishingServiceError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("review_persistence_failed") from exc
+
+    def acknowledge_review(
+        self,
+        version_id: int,
+        *,
+        allow_publish: bool,
+        actor_user_id: int | None,
+        note: str,
+    ) -> ReviewResult:
+        """Record the review decision using the API-facing vocabulary."""
+
+        return self.complete_review(
+            version_id,
+            approved=allow_publish,
+            actor_user_id=actor_user_id,
+            note=note,
+        )
+
+    def reject_version(
+        self,
+        version_id: int,
+        *,
+        actor_user_id: int | None,
+        reason: str,
+    ) -> ReviewResult:
+        """Reject an unpublished version that is awaiting a decision."""
+
+        rejection_reason = _required_reason(reason, "rejection_reason_required")
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                if ValuationStatus(version.status) not in {
+                    ValuationStatus.PENDING_REVIEW,
+                    ValuationStatus.PUBLISHABLE,
+                }:
+                    raise PublishingStateError("version_cannot_be_rejected")
+                version.status = ValuationStatus.REJECTED
+                self._audit(
+                    action="valuation.rejected",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=rejection_reason,
+                    summary={"to_status": ValuationStatus.REJECTED.value},
+                )
+                self.session.flush()
+                return ReviewResult(
+                    version_id=version.id, status=ValuationStatus.REJECTED
+                )
+        except PublishingServiceError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("rejection_persistence_failed") from exc
+
+    def publish_version(
+        self,
+        version_id: int,
+        *,
+        actor_user_id: int | None,
+        reason: str | None = None,
+        confirm_warnings: bool = False,
+        actor_label: str | None = None,
+    ) -> PublicationResult:
+        """Publish a validated version and supersede the current released version."""
+
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                self._require_status(version, ValuationStatus.PUBLISHABLE)
+                self._lock_fund(version.fund_id)
+                self._ensure_publish_validation(
+                    version,
+                    confirm_warnings=confirm_warnings,
+                )
+                superseded = self._supersede_current(
+                    version, actor_user_id=actor_user_id
+                )
+                version.status = ValuationStatus.PUBLISHED
+                version.published_at = utcnow()
+                version.published_by = actor_label or _actor_reference(actor_user_id)
+                version.release_reason = (
+                    _optional_reason(reason) or version.release_reason
+                )
+                self.session.flush()
+                analysis_run = self._create_analysis_run(version, "valuation_published")
+                self._audit(
+                    action="valuation.published",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=version.release_reason,
+                    summary={
+                        "superseded_version_ids": [item.id for item in superseded],
+                        "analysis_run_id": analysis_run.id,
+                    },
+                )
+                self.session.flush()
+                return PublicationResult(
+                    version_id=version.id,
+                    fund_id=version.fund_id,
+                    valuation_date=version.valuation_date,
+                    superseded_version_ids=tuple(item.id for item in superseded),
+                    analysis_run_id=analysis_run.id,
+                )
+        except PublishingServiceError:
+            raise
+        except IntegrityError as exc:
+            raise PublishingConflictError("publication_conflict") from exc
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("publication_persistence_failed") from exc
+
+    def publish(self, version_id: int, **kwargs: Any) -> PublicationResult:
+        return self.publish_version(version_id, **kwargs)
+
+    def revoke_version(
+        self,
+        version_id: int,
+        *,
+        actor_user_id: int | None,
+        reason: str,
+    ) -> PublicationResult:
+        """Remove the current version from dashboards without deleting history."""
+
+        revoke_reason = _required_reason(reason, "revoke_reason_required")
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                self._require_status(version, ValuationStatus.PUBLISHED)
+                self._lock_fund(version.fund_id)
+                version.status = ValuationStatus.REVOKED
+                self.session.flush()
+                analysis_run = self._create_analysis_run(version, "valuation_revoked")
+                self._audit(
+                    action="valuation.revoked",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=revoke_reason,
+                    summary={"analysis_run_id": analysis_run.id},
+                )
+                self.session.flush()
+                return PublicationResult(
+                    version_id=version.id,
+                    fund_id=version.fund_id,
+                    valuation_date=version.valuation_date,
+                    superseded_version_ids=(),
+                    analysis_run_id=analysis_run.id,
+                )
+        except PublishingServiceError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("revoke_persistence_failed") from exc
+
+    def revoke(self, version_id: int, **kwargs: Any) -> PublicationResult:
+        return self.revoke_version(version_id, **kwargs)
+
+    def restore_version(
+        self,
+        version_id: int,
+        *,
+        actor_user_id: int | None,
+        reason: str,
+        actor_label: str | None = None,
+    ) -> PublicationResult:
+        """Restore a superseded version as current and record a new release action."""
+
+        restore_reason = _required_reason(reason, "restore_reason_required")
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                if ValuationStatus(version.status) not in {
+                    ValuationStatus.SUPERSEDED,
+                    ValuationStatus.REVOKED,
+                }:
+                    raise PublishingStateError("version_cannot_be_restored")
+                self._lock_fund(version.fund_id)
+                superseded = self._supersede_current(
+                    version, actor_user_id=actor_user_id
+                )
+                version.status = ValuationStatus.PUBLISHED
+                version.published_at = utcnow()
+                version.published_by = actor_label or _actor_reference(actor_user_id)
+                version.release_reason = restore_reason
+                self.session.flush()
+                analysis_run = self._create_analysis_run(version, "valuation_restored")
+                self._audit(
+                    action="valuation.restored",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=restore_reason,
+                    summary={
+                        "superseded_version_ids": [item.id for item in superseded],
+                        "analysis_run_id": analysis_run.id,
+                    },
+                )
+                self._audit(
+                    action="valuation.published",
+                    version=version,
+                    actor_user_id=actor_user_id,
+                    reason=restore_reason,
+                    summary={
+                        "publication_kind": "restore",
+                        "analysis_run_id": analysis_run.id,
+                    },
+                )
+                self.session.flush()
+                return PublicationResult(
+                    version_id=version.id,
+                    fund_id=version.fund_id,
+                    valuation_date=version.valuation_date,
+                    superseded_version_ids=tuple(item.id for item in superseded),
+                    analysis_run_id=analysis_run.id,
+                )
+        except PublishingServiceError:
+            raise
+        except IntegrityError as exc:
+            raise PublishingConflictError("publication_conflict") from exc
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("restore_persistence_failed") from exc
+
+    def restore(self, version_id: int, **kwargs: Any) -> PublicationResult:
+        return self.restore_version(version_id, **kwargs)
+
+    def _load_version(
+        self, version_id: int, *, for_update: bool = False
+    ) -> ValuationVersion:
+        statement = select(ValuationVersion).where(ValuationVersion.id == version_id)
+        if for_update and self._supports_row_locks:
+            statement = statement.with_for_update()
+        version = self.session.scalar(statement)
+        if version is None:
+            raise PublishingStateError("valuation_version_not_found")
+        return version
+
+    def _lock_fund(self, fund_id: int) -> None:
+        statement = select(Fund.id).where(Fund.id == fund_id)
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        if self.session.scalar(statement) is None:
+            raise PublishingStateError("fund_not_found")
+
+    def _supersede_current(
+        self, target: ValuationVersion, *, actor_user_id: int | None
+    ) -> tuple[ValuationVersion, ...]:
+        statement = (
+            select(ValuationVersion)
+            .where(
+                ValuationVersion.fund_id == target.fund_id,
+                ValuationVersion.valuation_date == target.valuation_date,
+                ValuationVersion.status == ValuationStatus.PUBLISHED,
+                ValuationVersion.id != target.id,
+            )
+            .order_by(ValuationVersion.id)
+        )
+        if self._supports_row_locks:
+            statement = statement.with_for_update()
+        current = tuple(self.session.scalars(statement).all())
+        for version in current:
+            version.status = ValuationStatus.SUPERSEDED
+            self._audit(
+                action="valuation.superseded",
+                version=version,
+                actor_user_id=actor_user_id,
+                summary={"replacement_version_id": target.id},
+            )
+        if current:
+            self.session.flush()
+        return current
+
+    def _ensure_publish_validation(
+        self, version: ValuationVersion, *, confirm_warnings: bool
+    ) -> None:
+        levels = tuple(
+            self.session.scalars(
+                select(ValidationResult.level).where(
+                    ValidationResult.valuation_version_id == version.id
+                )
+            ).all()
+        )
+        if not levels:
+            raise PublishingValidationError("validation_required")
+        if ValidationLevel.WARNING in levels and not confirm_warnings:
+            raise PublishingValidationError("warning_confirmation_required")
+        if ValidationLevel.CRITICAL in levels and not self._review_was_approved(
+            version.id
+        ):
+            raise PublishingValidationError("critical_validation_unapproved")
+
+    def _review_was_approved(self, version_id: int) -> bool:
+        return (
+            self.session.scalar(
+                select(AuditLog.id)
+                .where(
+                    AuditLog.resource_type == "valuation_version",
+                    AuditLog.resource_id == str(version_id),
+                    AuditLog.action == "valuation.review_approved",
+                    AuditLog.result == AuditResult.SUCCESS,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    def _create_analysis_run(
+        self, version: ValuationVersion, trigger_reason: str
+    ) -> AnalysisRun:
+        analysis_run = AnalysisRun(
+            trigger_reason=trigger_reason,
+            input_start_date=version.valuation_date,
+            input_end_date=None,
+            input_version_range=f"valuation_version:{version.id}",
+            methodology_version=self.methodology_version,
+            status=AnalysisRunStatus.QUEUED,
+        )
+        self.session.add(analysis_run)
+        self.session.flush()
+        return analysis_run
+
+    def _audit(
+        self,
+        *,
+        action: str,
+        version: ValuationVersion,
+        actor_user_id: int | None,
+        reason: str | None = None,
+        summary: dict[str, object] | None = None,
+    ) -> None:
+        payload = {
+            "fund_id": version.fund_id,
+            "valuation_date": version.valuation_date.isoformat(),
+            "version_no": version.version_no,
+            **(summary or {}),
+        }
+        self.session.add(
+            AuditLog(
+                actor_user_id=actor_user_id,
+                action=action,
+                resource_type="valuation_version",
+                resource_id=str(version.id),
+                summary=payload,
+                reason=reason,
+                result=AuditResult.SUCCESS,
+            )
+        )
+
+    @staticmethod
+    def _require_status(version: ValuationVersion, required: ValuationStatus) -> None:
+        if ValuationStatus(version.status) != required:
+            raise PublishingStateError(
+                f"invalid_status_for_action:{ValuationStatus(version.status).value}"
+            )
+
+    @property
+    def _supports_row_locks(self) -> bool:
+        return (
+            self.session.bind is not None
+            and self.session.bind.dialect.name == "postgresql"
+        )
+
+
+def _required_reason(value: str, error_code: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise PublishingStateError(error_code)
+    return normalized
+
+
+def _optional_reason(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _actor_reference(actor_user_id: int | None) -> str | None:
+    return f"user:{actor_user_id}" if actor_user_id is not None else None
+
+
+__all__ = [
+    "PublicationResult",
+    "PublishedVersionImmutableError",
+    "PublishingConflictError",
+    "PublishingService",
+    "PublishingServiceError",
+    "PublishingStateError",
+    "PublishingValidationError",
+    "ReviewResult",
+]

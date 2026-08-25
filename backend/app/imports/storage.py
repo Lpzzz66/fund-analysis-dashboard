@@ -64,7 +64,9 @@ def stage_upload(
         raise InvalidFileError("unsupported_extension")
 
     temp_root.mkdir(parents=True, exist_ok=True)
-    descriptor, raw_path = tempfile.mkstemp(prefix="upload-", suffix=".tmp", dir=temp_root)
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix="upload-", suffix=".tmp", dir=temp_root
+    )
     temp_path = Path(raw_path)
     digest = hashlib.sha256()
     file_size = 0

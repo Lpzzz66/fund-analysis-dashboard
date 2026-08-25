@@ -38,9 +38,7 @@ def test_drawdown_does_not_divide_by_zero_or_fill_missing_value() -> None:
 
 
 def test_drawdown_for_all_zero_values_is_unknown() -> None:
-    result = calculate_drawdown(
-        [{"date": date(2026, 1, 1), "value": Decimal(0)}]
-    )
+    result = calculate_drawdown([{"date": date(2026, 1, 1), "value": Decimal(0)}])
 
     assert result.current_drawdown is None
     assert result.max_drawdown is None

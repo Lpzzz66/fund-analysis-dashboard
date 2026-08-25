@@ -48,7 +48,10 @@ class FundMetricDaily(Base):
     __tablename__ = "fund_metric_daily"
     __table_args__ = (
         UniqueConstraint(
-            "fund_id", "valuation_date", "source_analysis_run_id", name="uq_fund_metric_run_date"
+            "fund_id",
+            "valuation_date",
+            "source_analysis_run_id",
+            name="uq_fund_metric_run_date",
         ),
     )
 
@@ -72,7 +75,9 @@ class CompanyMetricDaily(Base):
     __tablename__ = "company_metric_daily"
     __table_args__ = (
         UniqueConstraint(
-            "valuation_date", "source_analysis_run_id", name="uq_company_metric_run_date"
+            "valuation_date",
+            "source_analysis_run_id",
+            name="uq_company_metric_run_date",
         ),
     )
 
@@ -83,7 +88,9 @@ class CompanyMetricDaily(Base):
     )
     company_index: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     company_daily_return: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
-    effective_fund_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    effective_fund_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     total_net_assets: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
 
 
@@ -123,7 +130,9 @@ class RiskEvent(Base):
     first_triggered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    last_triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     handling_note: Mapped[str | None] = mapped_column(Text)
     evidence_snapshot: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()

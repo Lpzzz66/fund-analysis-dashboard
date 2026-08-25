@@ -9,8 +9,18 @@ def test_company_index_uses_previous_day_net_asset_weights() -> None:
         [
             {"date": date(2026, 1, 1), "fund_id": "A", "net_asset_value": Decimal(100)},
             {"date": date(2026, 1, 1), "fund_id": "B", "net_asset_value": Decimal(300)},
-            {"date": date(2026, 1, 2), "fund_id": "A", "net_asset_value": Decimal(110), "daily_return": Decimal("0.1")},
-            {"date": date(2026, 1, 2), "fund_id": "B", "net_asset_value": Decimal(270), "daily_return": Decimal("-0.1")},
+            {
+                "date": date(2026, 1, 2),
+                "fund_id": "A",
+                "net_asset_value": Decimal(110),
+                "daily_return": Decimal("0.1"),
+            },
+            {
+                "date": date(2026, 1, 2),
+                "fund_id": "B",
+                "net_asset_value": Decimal(270),
+                "daily_return": Decimal("-0.1"),
+            },
         ],
         fund_ids=["A", "B"],
     )
@@ -29,9 +39,24 @@ def test_company_index_marks_missing_fund_in_coverage_without_forward_fill() -> 
         [
             {"date": date(2026, 1, 1), "fund_id": "A", "net_asset_value": Decimal(100)},
             {"date": date(2026, 1, 1), "fund_id": "B", "net_asset_value": Decimal(300)},
-            {"date": date(2026, 1, 2), "fund_id": "A", "net_asset_value": Decimal(110), "daily_return": Decimal("0.1")},
-            {"date": date(2026, 1, 2), "fund_id": "B", "net_asset_value": Decimal(270), "daily_return": Decimal("-0.1")},
-            {"date": date(2026, 1, 3), "fund_id": "A", "net_asset_value": Decimal(121), "daily_return": Decimal("0.1")},
+            {
+                "date": date(2026, 1, 2),
+                "fund_id": "A",
+                "net_asset_value": Decimal(110),
+                "daily_return": Decimal("0.1"),
+            },
+            {
+                "date": date(2026, 1, 2),
+                "fund_id": "B",
+                "net_asset_value": Decimal(270),
+                "daily_return": Decimal("-0.1"),
+            },
+            {
+                "date": date(2026, 1, 3),
+                "fund_id": "A",
+                "net_asset_value": Decimal(121),
+                "daily_return": Decimal("0.1"),
+            },
         ],
         fund_ids=["A", "B"],
     )
@@ -46,7 +71,12 @@ def test_company_index_does_not_carry_index_across_uncomputable_day() -> None:
         [
             {"date": date(2026, 1, 1), "fund_id": "A", "net_asset_value": Decimal(100)},
             {"date": date(2026, 1, 2), "fund_id": "A", "net_asset_value": Decimal(100)},
-            {"date": date(2026, 1, 3), "fund_id": "A", "net_asset_value": Decimal(110), "daily_return": Decimal("0.1")},
+            {
+                "date": date(2026, 1, 3),
+                "fund_id": "A",
+                "net_asset_value": Decimal(110),
+                "daily_return": Decimal("0.1"),
+            },
         ],
         fund_ids=["A"],
     )
@@ -63,7 +93,15 @@ def test_company_index_rejects_duplicate_fund_date() -> None:
     with pytest.raises(ValueError, match="duplicate fund record"):
         calculate_company_index(
             [
-                {"date": date(2026, 1, 1), "fund_id": "A", "net_asset_value": Decimal(100)},
-                {"date": date(2026, 1, 1), "fund_id": "A", "net_asset_value": Decimal(101)},
+                {
+                    "date": date(2026, 1, 1),
+                    "fund_id": "A",
+                    "net_asset_value": Decimal(100),
+                },
+                {
+                    "date": date(2026, 1, 1),
+                    "fund_id": "A",
+                    "net_asset_value": Decimal(101),
+                },
             ]
         )

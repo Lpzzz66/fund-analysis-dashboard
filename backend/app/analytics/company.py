@@ -44,7 +44,9 @@ def calculate_company_index(
             raise ValueError("company record requires valuation_date and fund_id")
         day = valuation_date(raw_date)
         if raw_fund_id in grouped.setdefault(day, {}):
-            raise ValueError(f"duplicate fund record: {raw_fund_id!r} on {day.isoformat()}")
+            raise ValueError(
+                f"duplicate fund record: {raw_fund_id!r} on {day.isoformat()}"
+            )
         nav = decimal(field(record, "net_asset_value", "nav"))
         daily_return = decimal(field(record, "daily_return", "return"))
         grouped[day][raw_fund_id] = (nav, daily_return)
@@ -66,9 +68,7 @@ def calculate_company_index(
             for fund_id in expected_ids
             if fund_id in current and current[fund_id][0] is not None
         ]
-        total_net_assets = (
-            sum(current_assets, Decimal(0)) if current_assets else None
-        )
+        total_net_assets = sum(current_assets, Decimal(0)) if current_assets else None
         if position == 0:
             available_count = sum(
                 fund_id in current and current[fund_id][0] is not None

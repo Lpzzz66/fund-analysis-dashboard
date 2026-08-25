@@ -10,10 +10,11 @@ from datetime import UTC, datetime, timedelta
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.base import AuditResult, UserRole, UserStatus
-from app.db.models import AuditLog, User, UserSession
+from app.db.models import AuditLog, SystemState, User, UserSession
 
 SESSION_TTL = timedelta(hours=12)
 LOCKOUT_THRESHOLD = 5
@@ -64,6 +65,8 @@ class AuthService:
         if self.session.scalar(select(func.count(User.id))) != 0:
             raise InitializationClosedError
 
+        self._claim_initialization()
+
         user = User(
             username=self._normalize_username(username),
             display_name=display_name,
@@ -80,6 +83,27 @@ class AuthService:
             actor_user_id=user.id,
         )
         return self._create_session(user)
+
+    def _claim_initialization(self) -> None:
+        state = self.session.get(SystemState, 1)
+        if state is None:
+            try:
+                with self.session.begin_nested():
+                    self.session.add(SystemState(id=1))
+                    self.session.flush()
+            except IntegrityError:
+                state = self.session.get(SystemState, 1)
+                if state is None:
+                    raise
+
+        result = self.session.execute(
+            update(SystemState)
+            .where(SystemState.id == 1, SystemState.initialized_at.is_(None))
+            .values(initialized_at=datetime.now(UTC))
+        )
+        if result.rowcount != 1:
+            raise InitializationClosedError
+        self.session.flush()
 
     def authenticate(
         self,

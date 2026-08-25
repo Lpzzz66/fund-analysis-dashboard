@@ -21,7 +21,9 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """Generate SQL without opening a database connection."""
 
-    database_url = config.get_main_option("sqlalchemy.url") or get_settings().database_url
+    database_url = (
+        config.get_main_option("sqlalchemy.url") or get_settings().database_url
+    )
     context.configure(
         url=database_url,
         target_metadata=target_metadata,

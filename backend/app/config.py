@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+MAX_UPLOAD_BYTES_LIMIT = 20 * 1024 * 1024
+
 
 def _default_database_url() -> str:
     """Return the local development database URL without creating the file."""
@@ -37,9 +39,7 @@ def get_settings() -> Settings:
     try:
         port = int(raw_port)
     except ValueError as exc:
-        raise ValueError(
-            "APP_PORT must be an integer between 1 and 65535"
-        ) from exc
+        raise ValueError("APP_PORT must be an integer between 1 and 65535") from exc
 
     if not 1 <= port <= 65535:
         raise ValueError("APP_PORT must be an integer between 1 and 65535")
@@ -63,14 +63,18 @@ def get_settings() -> Settings:
                 f"{', '.join(missing)} required when APP_ENV=production; "
                 "refusing to use local development storage"
             )
+        if not raw_database_url.lower().startswith(("postgresql://", "postgresql+")):
+            raise ValueError("DATABASE_URL must use PostgreSQL when APP_ENV=production")
 
-    raw_max_upload_bytes = os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))
+    raw_max_upload_bytes = os.getenv("MAX_UPLOAD_BYTES", str(MAX_UPLOAD_BYTES_LIMIT))
     try:
         max_upload_bytes = int(raw_max_upload_bytes)
     except ValueError as exc:
         raise ValueError("MAX_UPLOAD_BYTES must be a positive integer") from exc
     if max_upload_bytes <= 0:
         raise ValueError("MAX_UPLOAD_BYTES must be a positive integer")
+    if max_upload_bytes > MAX_UPLOAD_BYTES_LIMIT:
+        raise ValueError("MAX_UPLOAD_BYTES cannot exceed 20 MiB")
 
     return Settings(
         service_name=os.getenv("APP_SERVICE_NAME", "fund-dashboard-api"),

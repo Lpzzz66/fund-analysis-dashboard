@@ -11,5 +11,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     command: >-
-      sh -c "python -m pip install --no-cache-dir fastapi 'uvicorn[standard]' pytest httpx &&
+      sh -c "mkdir -p /workspace/backend/data/tmp/uploads /workspace/backend/data/source-files &&
+      python -m pip install --no-cache-dir -e '.[test]' &&
+      python -m alembic upgrade head &&
       python -m uvicorn app.main:app --host $${APP_HOST} --port $${APP_PORT} --reload"

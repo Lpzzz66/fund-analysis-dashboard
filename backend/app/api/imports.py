@@ -37,7 +37,9 @@ def create_batch(
     context: ImportOperator,
     session: DatabaseSession,
 ) -> dict[str, object]:
-    batch = _service(request, session).create_batch(payload.source_type, context.user.id)
+    batch = _service(request, session).create_batch(
+        payload.source_type, context.user.id
+    )
     session.commit()
     return {"data": _batch_data(batch)}
 

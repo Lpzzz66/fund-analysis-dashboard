@@ -40,6 +40,15 @@ class User(Base):
     )
 
 
+class SystemState(Base):
+    """Singleton state used for database-serialized one-time operations."""
+
+    __tablename__ = "system_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class UserSession(Base):
     __tablename__ = "user_session"
 
@@ -48,7 +57,9 @@ class UserSession(Base):
         ForeignKey("user_account.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     device_info: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = created_at_column()

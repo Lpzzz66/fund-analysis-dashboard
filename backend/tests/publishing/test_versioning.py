@@ -1,0 +1,359 @@
+from datetime import date
+from decimal import Decimal
+
+import pytest
+from app.db.base import (
+    AnalysisRunStatus,
+    AuditResult,
+    UserRole,
+    UserStatus,
+    ValidationLevel,
+    ValuationStatus,
+)
+from app.db.models import (
+    AnalysisRun,
+    AuditLog,
+    Fund,
+    FundDailySnapshot,
+    User,
+    ValidationResult,
+    ValuationVersion,
+)
+from app.publishing import (
+    PublishedVersionImmutableError,
+    PublishingService,
+    PublishingStateError,
+    PublishingValidationError,
+)
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+VALUATION_DATE = date(2026, 8, 25)
+
+
+def _actor(session: Session) -> User:
+    actor = User(
+        username="operator",
+        password_hash="not-used-by-workflow-tests",
+        role=UserRole.OPERATOR,
+        status=UserStatus.ACTIVE,
+    )
+    session.add(actor)
+    session.flush()
+    return actor
+
+
+def _fund(session: Session) -> Fund:
+    fund = Fund(standard_name="发布测试产品")
+    session.add(fund)
+    session.flush()
+    return fund
+
+
+def _version(
+    session: Session,
+    fund: Fund,
+    version_no: int,
+    *,
+    status: ValuationStatus = ValuationStatus.PUBLISHABLE,
+    level: ValidationLevel = ValidationLevel.INFO,
+) -> ValuationVersion:
+    version = ValuationVersion(
+        fund_id=fund.id,
+        valuation_date=VALUATION_DATE,
+        version_no=version_no,
+        status=status,
+    )
+    session.add(version)
+    session.flush()
+    session.add_all(
+        [
+            FundDailySnapshot(
+                valuation_version_id=version.id,
+                total_assets=Decimal(100),
+                total_liabilities=Decimal(30),
+                net_asset_value=Decimal(70),
+            ),
+            ValidationResult(
+                valuation_version_id=version.id,
+                rule_code="test_rule",
+                level=level,
+                message="测试校验结果",
+            ),
+        ]
+    )
+    session.flush()
+    return version
+
+
+def test_publish_creates_audit_and_analysis_run(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+
+    result = PublishingService(session).publish_version(
+        version.id,
+        actor_user_id=actor.id,
+        actor_label=actor.username,
+        reason="首次发布",
+    )
+    session.commit()
+
+    released = session.get(ValuationVersion, version.id)
+    analysis_run = session.get(AnalysisRun, result.analysis_run_id)
+    audit = session.scalar(
+        select(AuditLog).where(AuditLog.action == "valuation.published")
+    )
+    assert released.status == ValuationStatus.PUBLISHED
+    assert released.published_by == "operator"
+    assert released.release_reason == "首次发布"
+    assert released.published_at is not None
+    assert analysis_run.status == AnalysisRunStatus.QUEUED
+    assert analysis_run.input_start_date == VALUATION_DATE
+    assert audit.actor_user_id == actor.id
+    assert audit.result == AuditResult.SUCCESS
+
+
+def test_new_publication_supersedes_old_version_and_leaves_only_one_current(
+    session: Session,
+) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    first = _version(session, fund, 1)
+    second = _version(session, fund, 2)
+    session.commit()
+    service = PublishingService(session)
+
+    service.publish(first.id, actor_user_id=actor.id)
+    session.commit()
+    result = service.publish(second.id, actor_user_id=actor.id)
+    session.commit()
+
+    published_count = session.scalar(
+        select(func.count())
+        .select_from(ValuationVersion)
+        .where(
+            ValuationVersion.fund_id == fund.id,
+            ValuationVersion.valuation_date == VALUATION_DATE,
+            ValuationVersion.status == ValuationStatus.PUBLISHED,
+        )
+    )
+    assert result.superseded_version_ids == (first.id,)
+    assert session.get(ValuationVersion, first.id).status == ValuationStatus.SUPERSEDED
+    assert session.get(ValuationVersion, second.id).status == ValuationStatus.PUBLISHED
+    assert published_count == 1
+    supersede_audit = session.scalar(
+        select(AuditLog).where(AuditLog.action == "valuation.superseded")
+    )
+    assert supersede_audit.actor_user_id == actor.id
+    assert supersede_audit.summary["replacement_version_id"] == second.id
+
+
+def test_warning_requires_explicit_confirmation(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1, level=ValidationLevel.WARNING)
+    session.commit()
+    service = PublishingService(session)
+
+    with pytest.raises(
+        PublishingValidationError, match="warning_confirmation_required"
+    ):
+        service.publish(version.id, actor_user_id=actor.id)
+    assert version.status == ValuationStatus.PUBLISHABLE
+
+    service.publish(
+        version.id,
+        actor_user_id=actor.id,
+        confirm_warnings=True,
+    )
+    session.commit()
+    assert version.status == ValuationStatus.PUBLISHED
+
+
+def test_critical_result_requires_review_before_publication(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(
+        session,
+        fund,
+        1,
+        status=ValuationStatus.PENDING_REVIEW,
+        level=ValidationLevel.CRITICAL,
+    )
+    session.commit()
+    service = PublishingService(session)
+
+    pending = service.pending_reviews(fund_id=fund.id)
+    assert [item.id for item in pending] == [version.id]
+
+    review = service.complete_review(
+        version.id,
+        approved=True,
+        actor_user_id=actor.id,
+        note="已核对原始估值表，确认可发布",
+    )
+    assert review.status == ValuationStatus.PUBLISHABLE
+    service.publish(version.id, actor_user_id=actor.id)
+    session.commit()
+
+    assert version.status == ValuationStatus.PUBLISHED
+    actions = set(
+        session.scalars(
+            select(AuditLog.action).where(AuditLog.resource_id == str(version.id))
+        ).all()
+    )
+    assert {"valuation.review_approved", "valuation.published"} <= actions
+
+
+def test_review_rejection_is_terminal_and_audited(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(
+        session,
+        fund,
+        1,
+        status=ValuationStatus.PENDING_REVIEW,
+        level=ValidationLevel.CRITICAL,
+    )
+    session.commit()
+
+    result = PublishingService(session).complete_review(
+        version.id,
+        approved=False,
+        actor_user_id=actor.id,
+        note="产品身份不匹配",
+    )
+    session.commit()
+
+    assert result.status == ValuationStatus.REJECTED
+    with pytest.raises(
+        PublishingStateError, match="invalid_status_for_action:rejected"
+    ):
+        PublishingService(session).publish(version.id, actor_user_id=actor.id)
+    audit = session.scalar(
+        select(AuditLog).where(AuditLog.action == "valuation.review_rejected")
+    )
+    assert audit.reason == "产品身份不匹配"
+
+
+def test_revoke_removes_current_version_and_is_audited(session: Session) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+    service = PublishingService(session)
+    service.publish(version.id, actor_user_id=actor.id)
+    session.commit()
+
+    result = service.revoke(
+        version.id,
+        actor_user_id=actor.id,
+        reason="发现来源文件有误",
+    )
+    session.commit()
+
+    assert version.status == ValuationStatus.REVOKED
+    assert (
+        session.get(AnalysisRun, result.analysis_run_id).status
+        == AnalysisRunStatus.QUEUED
+    )
+    audit = session.scalar(
+        select(AuditLog).where(AuditLog.action == "valuation.revoked")
+    )
+    assert audit.reason == "发现来源文件有误"
+
+
+def test_restore_old_version_supersedes_current_and_records_new_release_action(
+    session: Session,
+) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    first = _version(session, fund, 1)
+    second = _version(session, fund, 2)
+    session.commit()
+    service = PublishingService(session)
+    service.publish(first.id, actor_user_id=actor.id)
+    session.commit()
+    service.publish(second.id, actor_user_id=actor.id)
+    session.commit()
+
+    result = service.restore(
+        first.id,
+        actor_user_id=actor.id,
+        actor_label=actor.username,
+        reason="回退到已复核的上一版",
+    )
+    session.commit()
+
+    assert result.superseded_version_ids == (second.id,)
+    assert first.status == ValuationStatus.PUBLISHED
+    assert second.status == ValuationStatus.SUPERSEDED
+    assert first.release_reason == "回退到已复核的上一版"
+    restore_audit = session.scalar(
+        select(AuditLog).where(AuditLog.action == "valuation.restored")
+    )
+    assert restore_audit.reason == "回退到已复核的上一版"
+    assert restore_audit.summary["superseded_version_ids"] == [second.id]
+    restore_publish_audit = session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "valuation.published",
+            AuditLog.resource_id == str(first.id),
+            AuditLog.summary["publication_kind"].as_string() == "restore",
+        )
+    )
+    assert restore_publish_audit is not None
+
+
+def test_revoked_version_can_be_restored_when_no_newer_version_is_current(
+    session: Session,
+) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+    service = PublishingService(session)
+    service.publish(version.id, actor_user_id=actor.id)
+    session.commit()
+    service.revoke(version.id, actor_user_id=actor.id, reason="撤回校验")
+    session.commit()
+
+    service.restore(version.id, actor_user_id=actor.id, reason="恢复已确认版本")
+    session.commit()
+
+    assert version.status == ValuationStatus.PUBLISHED
+
+
+def test_released_version_details_cannot_be_updated_or_deleted(
+    session: Session,
+) -> None:
+    actor = _actor(session)
+    fund = _fund(session)
+    version = _version(session, fund, 1)
+    session.commit()
+    service = PublishingService(session)
+    service.publish(version.id, actor_user_id=actor.id)
+    session.commit()
+    snapshot = session.scalar(
+        select(FundDailySnapshot).where(
+            FundDailySnapshot.valuation_version_id == version.id
+        )
+    )
+
+    snapshot.net_asset_value = Decimal(71)
+    with pytest.raises(
+        PublishedVersionImmutableError,
+        match="published_version_details_are_immutable",
+    ):
+        session.flush()
+    session.rollback()
+
+    snapshot = session.scalar(
+        select(FundDailySnapshot).where(
+            FundDailySnapshot.valuation_version_id == version.id
+        )
+    )
+    session.delete(snapshot)
+    with pytest.raises(PublishedVersionImmutableError):
+        session.flush()

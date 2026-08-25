@@ -84,7 +84,9 @@ def calculate_asset_allocation(
         AllocationItem(
             category=category,
             market_value=market_value,
-            weight=None if denominator in (None, Decimal(0)) else market_value / denominator,
+            weight=None
+            if denominator in (None, Decimal(0))
+            else market_value / denominator,
         )
         for category, market_value in grouped.items()
     ]
