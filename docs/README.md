@@ -34,6 +34,8 @@ python3 -m venv .venv
 .venv/bin/python -m uvicorn app.main:app --app-dir backend --reload
 ```
 
+开发 compose（本地容器编排）使用 `APP_HOST` 和 `APP_PORT` 启动后端，宿主机端口仅绑定到 `127.0.0.1`（本机回环地址）。
+
 本地服务启动后，健康检查地址为 `http://127.0.0.1:8000/health/live`。健康响应只包含固定的 `status`（状态）和 `service`（服务名）字段，不暴露主机名、路径、环境变量、数据库地址或密钥。
 
 ## Task 1（任务一）已完成范围
