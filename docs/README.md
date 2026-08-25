@@ -45,7 +45,34 @@ python3 -m venv .venv
 - 建立从环境变量读取的基础运行配置；缺省值仅用于本地开发。
 - 建立不访问数据库、文件目录或外部网络的健康检查测试。
 - 建立前端 `package.json`（Node.js 项目配置文件）占位和仅用于说明结构的开发编排文件。
-- 暂不实现 PostgreSQL（关系型数据库）连接、数据库迁移、认证、导入、解析、分析、后台任务或页面。
+- 已建立 PostgreSQL（关系型数据库）连接配置、数据库迁移、认证、原始文件接收和导入任务基础层；暂不实现 Excel（电子表格）解析、校验、发布、分析、邮件或页面。
+
+## Task 2（任务二）数据库基础层
+
+Task 2（任务二）增加 SQLAlchemy（Python 数据库访问库）模型、会话工具和 Alembic（数据库迁移工具）初始迁移。开发环境默认使用项目根目录下的 `data/dev.db`（SQLite，本地数据库）；生产环境必须通过 `DATABASE_URL`（数据库连接地址）提供 PostgreSQL 16（关系型数据库）连接，`APP_ENV=production`（生产环境）缺少该变量时会直接报错。
+
+在项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e 'backend[test]'
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini upgrade head
+```
+
+迁移命令只在执行升级或回退时连接数据库；测试使用 SQLite 内存库，不依赖 PostgreSQL、真实文件或历史目录。后续模型结构变更应新增 Alembic 迁移，不要在业务代码中调用 `create_all`。
+
+## 第一后端开发批次
+
+Task 3（任务三）实现本地账号、会话和权限：角色限制为 `admin`（管理员）、`operator`（业务员）和 `viewer`（普通看板）；首次初始化只允许创建一个管理员。密码使用 Argon2id（密码哈希算法），会话 Cookie（浏览器安全 Cookie）只传递随机令牌，数据库只保存令牌的 SHA-256（安全哈希）摘要。生产环境 Cookie 带 `Secure`（仅安全连接发送）属性，测试环境允许非 `Secure`。
+
+Task 4（任务四）实现 `.xls`（老式 Excel）和 `.xlsx`（新式 Excel）文件的安全接收：先写临时目录，再校验文件头、计算哈希和使用随机对象名保存；重复哈希只建立批次关联，不重复保存文件。完成批次后只创建数据库后台任务，不在接口进程中解析文件。默认单文件上限为 20 MB（兆字节），生产环境必须显式配置数据库地址、临时目录和原始文件目录。
+
+开发测试继续只使用 SQLite（本地数据库）内存库和 pytest（测试框架）临时目录，不依赖真实 PostgreSQL、历史目录或外部网络：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+.\.venv\Scripts\python.exe -m ruff check backend
+```
 
 ## 文档规则
 

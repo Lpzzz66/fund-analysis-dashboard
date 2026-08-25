@@ -2,7 +2,11 @@
 
 from fastapi import FastAPI
 
+from .api.auth import router as auth_router
+from .api.auth import user_router
+from .api.imports import router as imports_router
 from .config import get_settings
+from .db.session import create_engine
 
 
 def create_app() -> FastAPI:
@@ -10,6 +14,11 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
     app = FastAPI(title=settings.service_name)
+    app.state.settings = settings
+    app.state.db_engine = create_engine(settings.database_url)
+    app.include_router(auth_router)
+    app.include_router(user_router)
+    app.include_router(imports_router)
 
     @app.get("/health/live", tags=["health"])
     def health_live() -> dict[str, str]:

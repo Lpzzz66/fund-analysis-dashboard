@@ -50,6 +50,12 @@
 
 ## 2. 认证接口
 
+当前已实现的认证基础接口如下。
+
+### `POST /api/v1/auth/initialize`（初始化第一个管理员）
+
+只允许在数据库无用户时调用一次。请求包含账号、密码和可选显示名称；成功后直接建立管理员安全会话。
+
 ### `POST /api/v1/auth/login`（登录）
 
 请求：账号、密码。
@@ -66,7 +72,18 @@
 
 ### `POST /api/v1/auth/change-password`（修改密码）
 
-请求旧密码、新密码和确认密码；成功后撤销其他会话。
+请求旧密码和新密码；成功后撤销其他会话。
+
+管理员账号管理已实现以下最小接口，所有接口都由后端 `admin`（管理员）角色依赖保护：
+
+- `POST /api/v1/users`（创建用户）：创建 `admin`（管理员）、`operator`（业务员）或 `viewer`（普通看板）账号。
+- `POST /api/v1/users/{user_id}/disable`（禁用账号）。
+- `POST /api/v1/users/{user_id}/enable`（启用账号）。
+- `POST /api/v1/users/{user_id}/reset-password`（重置密码并撤销会话）。
+- `PATCH /api/v1/users/{user_id}/role`（修改角色）。
+- `POST /api/v1/users/{user_id}/revoke-sessions`（撤销全部会话）。
+
+登录失败返回通用错误，不泄露账号是否存在；连续 5 次失败锁定 15 分钟。会话通过 HttpOnly（禁止脚本读取）、生产环境 Secure（仅安全连接发送）、SameSite=Lax（限制跨站发送）的 Cookie 传递。
 
 ## 3. 总览和产品接口
 
@@ -130,17 +147,19 @@
 
 ## 4. 导入接口
 
+当前已实现的原始文件接收接口只允许 `admin`（管理员）和 `operator`（业务员），`viewer`（普通看板）不能查看导入运营状态。
+
 ### `POST /api/v1/imports`（创建导入批次）
 
 请求：来源类型、文件数量、客户端信息。返回批次编号和上传地址或上传令牌。
 
 ### `POST /api/v1/imports/{batch_id}/files`（上传文件）
 
-支持单文件或分片上传。首期单文件大小限制建议 20 MB；超过限制返回明确错误。
+当前支持逐个文件上传，不实现分片。首期单文件大小限制为 20 MB；超过限制返回明确错误。
 
 ### `POST /api/v1/imports/{batch_id}/complete`（完成上传）
 
-服务端核对文件哈希后创建解析任务。
+服务端核对批次文件后创建数据库后台任务；Excel 解析由后续任务实现。
 
 ### `GET /api/v1/imports`（导入列表）
 
@@ -149,6 +168,15 @@
 ### `GET /api/v1/imports/{import_id}`（导入详情）
 
 返回来源文件、邮件信息、识别结果、版本状态、任务状态和错误摘要。
+
+Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
+
+- `POST /api/v1/imports`（创建导入批次）。
+- `POST /api/v1/imports/{batch_id}/files`（接收单个 `.xls`（老式 Excel）或 `.xlsx`（新式 Excel）文件）。
+- `POST /api/v1/imports/{batch_id}/complete`（完成上传并创建 `background_job`（后台任务））。
+- `GET /api/v1/imports/{batch_id}`（查看批次、文件关联和任务状态）。
+
+首期默认单文件上限为 20 MB（兆字节）。上传文件先写配置的临时目录，校验扩展名和文件头后计算 SHA-256（安全哈希），正式存储使用随机对象名；重复哈希返回幂等结果并只新增批次关联。当前后台任务只负责入队和状态管理，尚未接入 Excel 解析、校验或发布流程。
 
 ### `GET /api/v1/imports/{import_id}/validations`（校验结果）
 
@@ -242,4 +270,3 @@
 - 服务端返回任务状态、进度、最近日志时间和是否可重试。
 
 这样足以覆盖每天几十个文件的处理量，也减少部署和排错复杂度。
-

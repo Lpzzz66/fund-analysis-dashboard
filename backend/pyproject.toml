@@ -8,7 +8,12 @@ version = "0.1.0"
 description = "Private fund valuation dashboard backend"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13,<2.0",
+    "argon2-cffi>=23.1,<26.0",
     "fastapi>=0.115,<1.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "python-multipart>=0.0.18,<1.0",
+    "sqlalchemy>=2.0,<3.0",
     "uvicorn[standard]>=0.30,<1.0",
 ]
 
@@ -16,11 +21,15 @@ dependencies = [
 test = [
     "httpx>=0.27,<1.0",
     "pytest>=8.0,<10.0",
+    "ruff>=0.9,<1.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "security: authentication and authorization security checks",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
