@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, over, select
 from sqlalchemy.orm import Session
 
 from app.analytics.nav import calculate_nav_series
@@ -47,29 +47,38 @@ def _published_versions(
     fund_id: int | None = None,
     as_of: date | None = None,
 ) -> list[ValuationVersion]:
-    statement = (
-        select(ValuationVersion)
+    """Return the most recent PUBLISHED version per active fund.
+
+    The previous implementation loaded every published version into Python and
+    deduplicated by fund_id there. On a real dataset that scan produced
+    hundreds of thousands of rows per call, which OOMed the worker whenever
+    list_funds walked the fund universe. The ROW_NUMBER() window function
+    pushes the same "latest per fund" logic into SQL.
+    """
+
+    rank = over(
+        func.row_number(),
+        partition_by=ValuationVersion.fund_id,
+        order_by=ValuationVersion.valuation_date.desc(),
+    )
+    subquery = (
+        select(ValuationVersion.id, rank.label("_rank"))
         .join(Fund, Fund.id == ValuationVersion.fund_id)
         .where(ValuationVersion.status == ValuationStatus.PUBLISHED)
         .where(Fund.status == FundStatus.ACTIVE)
-        .order_by(
-            ValuationVersion.fund_id,
-            ValuationVersion.valuation_date.desc(),
-            ValuationVersion.id.desc(),
-        )
     )
     if fund_id is not None:
-        statement = statement.where(ValuationVersion.fund_id == fund_id)
+        subquery = subquery.where(ValuationVersion.fund_id == fund_id)
     if as_of is not None:
-        statement = statement.where(ValuationVersion.valuation_date == as_of)
-    selected: list[ValuationVersion] = []
-    seen_funds: set[int] = set()
-    for version in session.scalars(statement):
-        if version.fund_id in seen_funds:
-            continue
-        seen_funds.add(version.fund_id)
-        selected.append(version)
-    return selected
+        subquery = subquery.where(ValuationVersion.valuation_date == as_of)
+    subquery = subquery.subquery()
+    statement = (
+        select(ValuationVersion)
+        .join(subquery, subquery.c.id == ValuationVersion.id)
+        .where(subquery.c._rank == 1)
+        .order_by(ValuationVersion.fund_id)
+    )
+    return list(session.scalars(statement))
 
 
 def _version_for_fund(
