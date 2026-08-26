@@ -6,6 +6,7 @@ from .api.auth import router as auth_router
 from .api.auth import user_router
 from .api.catalog import router as catalog_router
 from .api.dashboard import router as dashboard_router
+from .api.exports import router as exports_router
 from .api.imports import router as imports_router
 from .api.mail import router as mail_router
 from .api.reviews import router as reviews_router
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(user_router)
     app.include_router(imports_router)
+    app.include_router(exports_router)
     app.include_router(mail_router)
     app.include_router(dashboard_router)
     app.include_router(reviews_router)
