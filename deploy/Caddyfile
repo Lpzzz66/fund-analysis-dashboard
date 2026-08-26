@@ -1,6 +1,5 @@
 {
 	email {$ACME_EMAIL}
-	auto_https on
 }
 
 {$DASHBOARD_DOMAIN} {
