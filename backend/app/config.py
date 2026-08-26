@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MAX_UPLOAD_BYTES_LIMIT = 20 * 1024 * 1024
+DEFAULT_SOURCE_RETENTION_DAYS = 365
 
 
 def _default_database_url() -> str:
@@ -29,6 +30,8 @@ class Settings:
     database_url: str = ""
     upload_temp_dir: str = ""
     source_storage_dir: str = ""
+    source_retention_days: int = DEFAULT_SOURCE_RETENTION_DAYS
+    database_backup_dir: str = ""
     max_upload_bytes: int = 20 * 1024 * 1024
 
 
@@ -48,6 +51,7 @@ def get_settings() -> Settings:
     raw_database_url = os.getenv("DATABASE_URL")
     raw_temp_dir = os.getenv("UPLOAD_TEMP_DIR")
     raw_storage_dir = os.getenv("SOURCE_STORAGE_DIR")
+    raw_backup_dir = os.getenv("DATABASE_BACKUP_DIR")
     if environment.lower() == "production":
         missing = [
             name
@@ -77,6 +81,16 @@ def get_settings() -> Settings:
     if max_upload_bytes > MAX_UPLOAD_BYTES_LIMIT:
         raise ValueError("MAX_UPLOAD_BYTES cannot exceed 20 MiB")
 
+    raw_retention_days = os.getenv(
+        "SOURCE_RETENTION_DAYS", str(DEFAULT_SOURCE_RETENTION_DAYS)
+    )
+    try:
+        source_retention_days = int(raw_retention_days)
+    except ValueError as exc:
+        raise ValueError("SOURCE_RETENTION_DAYS must be a positive integer") from exc
+    if source_retention_days <= 0:
+        raise ValueError("SOURCE_RETENTION_DAYS must be a positive integer")
+
     return Settings(
         service_name=os.getenv("APP_SERVICE_NAME", "fund-dashboard-api"),
         environment=environment,
@@ -85,5 +99,7 @@ def get_settings() -> Settings:
         database_url=raw_database_url or _default_database_url(),
         upload_temp_dir=raw_temp_dir or _project_data_path("tmp", "uploads"),
         source_storage_dir=raw_storage_dir or _project_data_path("source-files"),
+        source_retention_days=source_retention_days,
+        database_backup_dir=raw_backup_dir or _project_data_path("backups"),
         max_upload_bytes=max_upload_bytes,
     )
