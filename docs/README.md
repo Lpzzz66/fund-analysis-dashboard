@@ -16,6 +16,7 @@
 - [历史估值文件只读盘点工具](../tools/valuation_inventory/README.md)：依赖、运行命令、报告格式、只读边界和去重口径。
 - [后端实施计划](plans/2026-08-25-fund-dashboard-backend.md)：按阶段执行的后端和接口开发任务。
 - [维护与生产闭环计划](plans/2026-08-26-maintenance-and-production.md)：维护 API、生产部署和端到端验收边界。
+- [范围收敛与真实数据闭环计划](plans/2026-08-26-scope-convergence.md)：限制 Excel 数据边界、修复解析缺口、补齐必要查询并将前端从模拟数据切换到真实接口。
 
 ## 当前开发环境
 
