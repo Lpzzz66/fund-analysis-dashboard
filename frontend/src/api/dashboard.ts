@@ -1,2 +1,7 @@
-// Dashboard endpoints are added here as their pages are connected in the next task.
-export {};
+import { apiRequest } from "./client";
+import type { DashboardOverviewResponse } from "./types";
+
+export function getOverview(asOf?: string) {
+  const query = asOf ? `?as_of=${encodeURIComponent(asOf)}` : "";
+  return apiRequest<DashboardOverviewResponse>(`/dashboard/overview${query}`);
+}
