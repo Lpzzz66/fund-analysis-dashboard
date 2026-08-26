@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Layout, Menu, Avatar, Dropdown, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import type { UserRole } from "@/utils/constants";
 import { ROLE_LABEL } from "@/utils/constants";
 import { navForRole } from "@/utils/permissions";
 import { useAuth } from "@/app/auth";
@@ -32,7 +31,7 @@ const ALL_NAV: NavItem[] = [
 ];
 
 export function AppLayout() {
-  const { session, logout, switchRole } = useAuth();
+  const { session, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const loc = useLocation();
@@ -64,18 +63,20 @@ export function AppLayout() {
     [allowed],
   );
 
-  const roleMenu = {
+  const userMenu = {
     items: [
-      ...(session ? (["admin", "operator", "viewer"] as UserRole[]).map((r) => ({
-        key: `role-${r}`,
-        label: `切换为${ROLE_LABEL[r]}`,
-      })) : []),
-      { type: "divider" as const },
       { key: "logout", label: "退出登录", danger: true },
     ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === "logout") logout();
-      else if (key.startsWith("role-")) switchRole(key.slice(5) as UserRole);
+    onClick: async ({ key }: { key: string }) => {
+      if (key === "logout") {
+        try {
+          await logout();
+        } catch {
+          // The provider has already cleared the local session.
+        } finally {
+          navigate("/login", { replace: true });
+        }
+      }
     },
   };
 
@@ -153,7 +154,7 @@ export function AppLayout() {
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             {ALL_NAV.find((n) => loc.pathname.startsWith(n.path))?.label ?? ""}
           </Typography.Text>
-          <Dropdown menu={roleMenu} placement="bottomRight">
+          <Dropdown menu={userMenu} placement="bottomRight">
             <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
               <Avatar size={30} style={{ background: "var(--ink)", fontFamily: "var(--mono)", fontSize: 12 }}>
                 {(session?.display_name ?? "?").slice(0, 1)}

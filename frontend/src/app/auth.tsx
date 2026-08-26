@@ -1,71 +1,122 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
-import * as api from "@/mock/api";
-import type { UserRole } from "@/utils/constants";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import * as authApi from "@/api/auth";
+import {
+  advanceSessionGeneration,
+  getSessionGeneration,
+  isApiError,
+  setUnauthorizedHandler,
+} from "@/api/client";
+import type { InitializeInput, UserSession } from "@/api/types";
 
-export interface Session {
-  id: number;
-  username: string;
-  display_name: string;
-  role: UserRole;
-  status: "active" | "disabled";
-}
+export type Session = UserSession;
 
-interface AuthCtx {
-  session: Session | null;
+interface AuthContextValue {
+  loading: boolean;
   initialized: boolean;
+  session: Session | null;
   login: (username: string, password: string) => Promise<Session>;
-  logout: () => void;
-  switchRole: (role: UserRole) => void;
+  initialize: (payload: InitializeInput) => Promise<Session>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<Session | null>;
 }
 
-const Ctx = createContext<AuthCtx>(null as never);
-
-const KEY = "fd-session";
+const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(() => {
-    const raw = sessionStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  });
-  const [initialized] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
 
-  function persist(s: Session | null) {
-    if (s) sessionStorage.setItem(KEY, JSON.stringify(s));
-    else sessionStorage.removeItem(KEY);
-    setSession(s);
-  }
+  const refresh = useCallback(async (): Promise<Session | null> => {
+    const status = await authApi.authStatus();
+    setInitialized(status.initialized);
+    if (!status.initialized) {
+      setSession(null);
+      return null;
+    }
+    try {
+      const current = await authApi.me();
+      advanceSessionGeneration();
+      setSession(current);
+      return current;
+    } catch (error) {
+      if (!isApiError(error, 401)) throw error;
+      setSession(null);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void refresh()
+      .catch(() => {
+        if (active) {
+          setInitialized(true);
+          setSession(null);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    setUnauthorizedHandler((requestGeneration) => {
+      if (requestGeneration !== getSessionGeneration()) return;
+      advanceSessionGeneration();
+      setSession(null);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  const login = useCallback(async (username: string, password: string) => {
+    const current = await authApi.login({ username, password });
+    advanceSessionGeneration();
+    setInitialized(true);
+    setSession(current);
+    return current;
+  }, []);
+
+  const initialize = useCallback(async (payload: InitializeInput) => {
+    const current = await authApi.initialize(payload);
+    advanceSessionGeneration();
+    setInitialized(true);
+    setSession(current);
+    return current;
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } finally {
+      advanceSessionGeneration();
+      setSession(null);
+    }
+  }, []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ loading, initialized, session, login, initialize, logout, refresh }),
+    [initialized, initialize, loading, login, logout, refresh, session],
+  );
 
   return (
-    <Ctx.Provider
-      value={{
-        session,
-        initialized,
-        login: async (username, password) => {
-          const res = await api.login(username, password);
-          if (res.data.id === 0) throw new Error("账号或密码错误");
-          const s: Session = {
-            id: res.data.id,
-            username: res.data.username,
-            display_name: res.data.display_name,
-            role: res.data.role,
-            status: res.data.status,
-          };
-          persist(s);
-          return s;
-        },
-        logout: () => persist(null),
-        switchRole: (role) => {
-          if (!session) return;
-          const next = { ...session, role, username: role, display_name: role === "admin" ? "系统管理员" : role === "operator" ? "张业务" : "王看板" };
-          persist(next);
-        },
-      }}
-    >
-      {children}
-    </Ctx.Provider>
+    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
   );
 }
 
-export function useAuth() {
-  return useContext(Ctx);
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth must be used inside AuthProvider");
+  return context;
 }
