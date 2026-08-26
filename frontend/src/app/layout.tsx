@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout, Menu, Avatar, Dropdown, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ROLE_LABEL } from "@/utils/constants";
@@ -58,10 +58,16 @@ export function AppLayout() {
     return match ? [match.path] : [loc.pathname];
   }, [loc.pathname]);
 
-  const openKeys = useMemo(
+  const initialOpenKeys = useMemo(
     () => Array.from(new Set(ALL_NAV.filter((n) => allowed.has(n.key)).map((n) => n.group))),
     [allowed],
   );
+  const [openKeys, setOpenKeys] = useState<string[]>(initialOpenKeys);
+  // Reset expanded groups whenever the role changes so a fresh login (or a
+  // logout/login as a different role) doesn't keep stale groups open.
+  useEffect(() => {
+    setOpenKeys(initialOpenKeys);
+  }, [initialOpenKeys]);
 
   const userMenu = {
     items: [
@@ -131,7 +137,8 @@ export function AppLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={selected}
-          defaultOpenKeys={openKeys}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
           items={items}
           onClick={({ key }) => navigate(key)}
         />

@@ -63,8 +63,28 @@ export function listUsers(params: { q?: string; role?: string; status?: string; 
 export function createUser(payload: { username: string; password: string; role: string; display_name?: string }) {
   return apiRequest<ApiEnvelope<UserSession>>("/users", { method: "POST", body: payload });
 }
-export function disableUser(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/disable`, { method: "POST" }); }
+export function disableUser(id: number, reason?: string) {
+  return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/disable`, {
+    method: "POST",
+    body: reason ? { reason } : {},
+  });
+}
 export function enableUser(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/enable`, { method: "POST" }); }
-export function changeUserRole(id: number, role: string) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/role`, { method: "PATCH", body: { role } }); }
-export function resetUserPassword(id: number, password: string) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/reset-password`, { method: "POST", body: { password } }); }
-export function revokeUserSessions(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/revoke-sessions`, { method: "POST" }); }
+export function changeUserRole(id: number, role: string, reason?: string) {
+  return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/role`, {
+    method: "PATCH",
+    body: reason ? { role, reason } : { role },
+  });
+}
+export function resetUserPassword(id: number, password: string, reason?: string) {
+  return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/reset-password`, {
+    method: "POST",
+    body: reason ? { password, reason } : { password },
+  });
+}
+export function revokeUserSessions(id: number, reason?: string) {
+  return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/revoke-sessions`, {
+    method: "POST",
+    body: reason ? { reason } : {},
+  });
+}

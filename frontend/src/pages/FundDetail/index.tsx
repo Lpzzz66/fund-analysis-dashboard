@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Card, Descriptions, Skeleton, Space, Tabs, Tag } from "antd";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import * as fundsApi from "@/api/funds";
 import type { FundDetail as FundDetailData } from "@/api/types";
 import { QualityBadge } from "@/components";
@@ -10,8 +10,11 @@ import { PositionsTab } from "./tabs/Positions";
 import { QualityTab } from "./tabs/Quality";
 
 export default function FundDetail() {
-  const { id } = useParams(); const fundId = Number(id); const [params, setParams] = useSearchParams(); const [fund, setFund] = useState<FundDetailData | null>(null); const [error, setError] = useState<string | null>(null);
-  useEffect(() => { void fundsApi.detail(fundId).then((r) => setFund(r.data)).catch(() => setError("产品详情加载失败，请返回产品列表重试")); }, [fundId]);
+  const { id } = useParams(); const [params, setParams] = useSearchParams(); const [fund, setFund] = useState<FundDetailData | null>(null); const [error, setError] = useState<string | null>(null);
+  const rawId = Number(id);
+  const fundId = Number.isInteger(rawId) && rawId > 0 ? rawId : NaN;
+  useEffect(() => { if (!Number.isInteger(fundId)) return; void fundsApi.detail(fundId).then((r) => setFund(r.data)).catch(() => setError("产品详情加载失败，请返回产品列表重试")); }, [fundId]);
+  if (!Number.isInteger(fundId)) return <Navigate to="/funds" replace />;
   if (error) return <div className="fd-page"><Alert type="error" showIcon message={error} /></div>;
   if (!fund) return <Skeleton active style={{ padding: 40 }} />;
   const activeTab = ["nav", "positions", "quality"].includes(params.get("tab") ?? "") ? params.get("tab")! : "nav";

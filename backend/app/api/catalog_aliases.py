@@ -158,12 +158,17 @@ def update_alias(
     return {"data": _alias_data(alias)}
 
 
+class DeleteAliasRequest(StrictModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 @router.delete("/funds/{fund_id}/aliases/{alias_id}")
 def delete_alias(
     fund_id: int,
     alias_id: int,
     context: CatalogOperator,
     session: DatabaseSession,
+    payload: DeleteAliasRequest | None = None,
 ) -> dict[str, object]:
     alias = _alias_or_404(session, fund_id, alias_id)
     resource_id = alias.id
@@ -174,6 +179,7 @@ def delete_alias(
         action="fund_alias.delete",
         resource_type="fund_alias",
         resource_id=resource_id,
+        reason=payload.reason if payload else None,
     )
     _commit(session)
     return {"data": {"id": resource_id, "deleted": True}}

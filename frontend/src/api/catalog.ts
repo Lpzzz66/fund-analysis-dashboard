@@ -24,7 +24,12 @@ export function disableFund(id: number, reason: string) { return apiRequest<ApiE
 export function listAliases(fundId: number) { return apiRequest<ApiPage<Alias>>(`/funds/${fundId}/aliases`); }
 export function createAlias(fundId: number, payload: Record<string, unknown>) { return apiRequest<ApiEnvelope<Alias>>(`/funds/${fundId}/aliases`, { method: "POST", body: payload }); }
 export function updateAlias(fundId: number, aliasId: number, payload: Record<string, unknown>) { return apiRequest<ApiEnvelope<Alias>>(`/funds/${fundId}/aliases/${aliasId}`, { method: "PATCH", body: payload }); }
-export function deleteAlias(fundId: number, aliasId: number) { return apiRequest<ApiEnvelope<{ id: number; deleted: boolean }>>(`/funds/${fundId}/aliases/${aliasId}`, { method: "DELETE" }); }
+export function deleteAlias(fundId: number, aliasId: number, reason?: string) {
+  return apiRequest<ApiEnvelope<{ id: number; deleted: boolean }>>(`/funds/${fundId}/aliases/${aliasId}`, {
+    method: "DELETE",
+    body: reason ? { reason } : {},
+  });
+}
 export function listShareClasses(fundId: number) { return apiRequest<ApiPage<ShareClass>>(`/funds/${fundId}/share-classes`); }
 export function createShareClass(fundId: number, payload: Record<string, unknown>) { return apiRequest<ApiEnvelope<ShareClass>>(`/funds/${fundId}/share-classes`, { method: "POST", body: payload }); }
 export function updateShareClass(fundId: number, id: number, payload: Record<string, unknown>) { return apiRequest<ApiEnvelope<ShareClass>>(`/funds/${fundId}/share-classes/${id}`, { method: "PATCH", body: payload }); }
