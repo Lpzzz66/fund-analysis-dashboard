@@ -99,6 +99,111 @@ class _SafetyDecision:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _SafetyContext:
+    """Batch-loaded safety data for one retention run."""
+
+    audits_by_source_file_id: dict[int, tuple[AuditLog, ...]]
+    valuation_statuses_by_source_file_id: dict[int, tuple[str, ...]]
+    batch_ids_by_source_file_id: dict[int, tuple[int, ...]]
+    task_statuses_by_batch_id: dict[str, tuple[str, ...]]
+    failed_audit_source_file_ids: frozenset[int]
+    latest_backup_audits_by_source_file_id: dict[int, AuditLog]
+
+    @classmethod
+    def load(cls, session: Session, source_file_ids: tuple[int, ...]) -> _SafetyContext:
+        """Load every database fact used by safety decisions in batches."""
+
+        if not source_file_ids:
+            return cls({}, {}, {}, {}, frozenset(), {})
+
+        resource_ids = tuple(str(source_file_id) for source_file_id in source_file_ids)
+        source_id_by_resource_id = dict(zip(resource_ids, source_file_ids))
+        source_file_audits = session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.resource_type == "source_file",
+                AuditLog.resource_id.in_(resource_ids),
+            )
+            .order_by(AuditLog.id)
+        ).all()
+        audits_by_source_file_id: dict[int, list[AuditLog]] = {}
+        failed_audit_source_file_ids: set[int] = set()
+        latest_backup_audits_by_source_file_id: dict[int, AuditLog] = {}
+        for audit in source_file_audits:
+            if audit.resource_id is None:
+                continue
+            source_file_id = source_id_by_resource_id[audit.resource_id]
+            audits_by_source_file_id.setdefault(source_file_id, []).append(audit)
+            if audit.action in FAILED_AUDIT_ACTIONS:
+                failed_audit_source_file_ids.add(source_file_id)
+            if audit.action in SOURCE_BACKUP_AUDIT_ACTIONS:
+                latest_backup_audits_by_source_file_id[source_file_id] = audit
+
+        valuation_rows = session.execute(
+            select(ValuationVersion.source_file_id, ValuationVersion.status).where(
+                ValuationVersion.source_file_id.in_(source_file_ids)
+            )
+        ).all()
+        valuation_statuses_by_source_file_id: dict[int, list[str]] = {}
+        for source_file_id, status in valuation_rows:
+            if source_file_id is not None:
+                value = (
+                    status.value if isinstance(status, ValuationStatus) else str(status)
+                )
+                valuation_statuses_by_source_file_id.setdefault(
+                    source_file_id, []
+                ).append(value)
+
+        batch_rows = session.execute(
+            select(ImportBatchFile.source_file_id, ImportBatchFile.batch_id)
+            .where(ImportBatchFile.source_file_id.in_(source_file_ids))
+            .order_by(ImportBatchFile.id)
+        ).all()
+        batch_ids_by_source_file_id: dict[int, list[int]] = {}
+        batch_ids: set[int] = set()
+        for source_file_id, batch_id in batch_rows:
+            batch_ids_by_source_file_id.setdefault(source_file_id, []).append(batch_id)
+            batch_ids.add(batch_id)
+
+        task_statuses_by_batch_id: dict[str, list[str]] = {}
+        if batch_ids:
+            task_rows = session.execute(
+                select(BackgroundJob.resource_id, BackgroundJob.status)
+                .where(
+                    BackgroundJob.job_type == "process_import_batch",
+                    BackgroundJob.resource_id.in_(
+                        str(batch_id) for batch_id in batch_ids
+                    ),
+                )
+                .order_by(BackgroundJob.id)
+            ).all()
+            for resource_id, status in task_rows:
+                value = status.value if isinstance(status, JobStatus) else str(status)
+                task_statuses_by_batch_id.setdefault(resource_id, []).append(value)
+
+        return cls(
+            audits_by_source_file_id={
+                source_file_id: tuple(audits)
+                for source_file_id, audits in audits_by_source_file_id.items()
+            },
+            valuation_statuses_by_source_file_id={
+                source_file_id: tuple(statuses)
+                for source_file_id, statuses in valuation_statuses_by_source_file_id.items()
+            },
+            batch_ids_by_source_file_id={
+                source_file_id: tuple(batch_ids)
+                for source_file_id, batch_ids in batch_ids_by_source_file_id.items()
+            },
+            task_statuses_by_batch_id={
+                resource_id: tuple(statuses)
+                for resource_id, statuses in task_statuses_by_batch_id.items()
+            },
+            failed_audit_source_file_ids=frozenset(failed_audit_source_file_ids),
+            latest_backup_audits_by_source_file_id=latest_backup_audits_by_source_file_id,
+        )
+
+
 class RetentionService:
     """Plan and optionally remove expired raw objects without touching rows."""
 
@@ -152,6 +257,9 @@ class RetentionService:
             ).all()
             if self._retention_expired(source_file, current_date)
         ]
+        safety_context = _SafetyContext.load(
+            self.session, tuple(source_file.id for source_file in candidates)
+        )
         skipped_reasons: dict[str, int] = {}
         errors: list[str] = []
         planned: list[tuple[SourceFile, Path]] = []
@@ -159,7 +267,7 @@ class RetentionService:
 
         for source_file in candidates:
             total_size += max(source_file.file_size, 0)
-            decision = self._safety_decision(source_file)
+            decision = self._safety_decision(source_file, safety_context)
             if decision.reason is not None:
                 skipped_reasons[decision.reason] = (
                     skipped_reasons.get(decision.reason, 0) + 1
@@ -272,20 +380,13 @@ class RetentionService:
         created_on = created_at.astimezone(UTC).date()
         return created_on + timedelta(days=self.retention_days) <= as_of
 
-    def _safety_decision(self, source_file: SourceFile) -> _SafetyDecision:
-        audits = list(
-            self.session.scalars(
-                select(AuditLog)
-                .where(
-                    AuditLog.resource_type == "source_file",
-                    AuditLog.resource_id == str(source_file.id),
-                )
-                .order_by(AuditLog.id)
-            ).all()
-        )
-        if self._has_pending_review(source_file, audits):
+    def _safety_decision(
+        self, source_file: SourceFile, safety_context: _SafetyContext
+    ) -> _SafetyDecision:
+        audits = safety_context.audits_by_source_file_id.get(source_file.id, ())
+        if self._has_pending_review(source_file, audits, safety_context):
             return _SafetyDecision("pending_review_reference")
-        task_reason = self._task_reference_reason(source_file)
+        task_reason = self._task_reference_reason(source_file, safety_context)
         if task_reason is not None:
             return _SafetyDecision(task_reason)
         if self._is_audit_locked(audits):
@@ -294,7 +395,7 @@ class RetentionService:
             backed_up = (
                 self.backup_checker(source_file)
                 if self.backup_checker is not None
-                else self._has_source_backup_audit(source_file.id)
+                else self._has_source_backup_audit(source_file.id, safety_context)
             )
         except Exception:  # noqa: BLE001 - a failed checker must fail closed
             return _SafetyDecision(
@@ -306,58 +407,53 @@ class RetentionService:
         return _SafetyDecision()
 
     def _has_pending_review(
-        self, source_file: SourceFile, audits: list[AuditLog]
+        self,
+        source_file: SourceFile,
+        audits: tuple[AuditLog, ...],
+        safety_context: _SafetyContext,
     ) -> bool:
-        pending_version = self.session.scalar(
-            select(ValuationVersion.id)
-            .where(
-                ValuationVersion.source_file_id == source_file.id,
-                ValuationVersion.status == ValuationStatus.PENDING_REVIEW,
+        if (
+            ValuationStatus.PENDING_REVIEW.value
+            in safety_context.valuation_statuses_by_source_file_id.get(
+                source_file.id, ()
             )
-            .limit(1)
-        )
-        if pending_version is not None:
+        ):
             return True
         return any(
             self._normalized_action(audit.action) in REVIEW_AUDIT_ACTIONS
             for audit in audits
         )
 
-    def _task_reference_reason(self, source_file: SourceFile) -> str | None:
-        batch_ids = self.session.scalars(
-            select(ImportBatchFile.batch_id).where(
-                ImportBatchFile.source_file_id == source_file.id
-            )
-        ).all()
+    def _task_reference_reason(
+        self, source_file: SourceFile, safety_context: _SafetyContext
+    ) -> str | None:
+        batch_ids = safety_context.batch_ids_by_source_file_id.get(source_file.id, ())
         if not batch_ids:
-            return self._failed_audit_reason(source_file.id)
-        statuses = self.session.scalars(
-            select(BackgroundJob.status).where(
-                BackgroundJob.job_type == "process_import_batch",
-                BackgroundJob.resource_id.in_(str(batch_id) for batch_id in batch_ids),
+            return self._failed_audit_reason(source_file.id, safety_context)
+        statuses = (
+            status
+            for batch_id in batch_ids
+            for status in safety_context.task_statuses_by_batch_id.get(
+                str(batch_id), ()
             )
-        ).all()
-        for status in statuses:
-            value = status.value if isinstance(status, JobStatus) else str(status)
-            if value == JobStatus.FAILED.value:
-                return "failed_task_reference"
-            if value in ACTIVE_TASK_STATUSES:
-                return "active_task_reference"
-        return self._failed_audit_reason(source_file.id)
-
-    def _failed_audit_reason(self, source_file_id: int) -> str | None:
-        failed = self.session.scalar(
-            select(AuditLog.id)
-            .where(
-                AuditLog.resource_type == "source_file",
-                AuditLog.resource_id == str(source_file_id),
-                AuditLog.action.in_(FAILED_AUDIT_ACTIONS),
-            )
-            .limit(1)
         )
-        return "failed_task_reference" if failed is not None else None
+        for status in statuses:
+            if status == JobStatus.FAILED.value:
+                return "failed_task_reference"
+            if status in ACTIVE_TASK_STATUSES:
+                return "active_task_reference"
+        return self._failed_audit_reason(source_file.id, safety_context)
 
-    def _is_audit_locked(self, audits: list[AuditLog]) -> bool:
+    def _failed_audit_reason(
+        self, source_file_id: int, safety_context: _SafetyContext
+    ) -> str | None:
+        return (
+            "failed_task_reference"
+            if source_file_id in safety_context.failed_audit_source_file_ids
+            else None
+        )
+
+    def _is_audit_locked(self, audits: tuple[AuditLog, ...]) -> bool:
         locked = False
         for audit in audits:
             action = self._normalized_action(audit.action)
@@ -371,16 +467,11 @@ class RetentionService:
                     locked = flag
         return locked
 
-    def _has_source_backup_audit(self, source_file_id: int) -> bool:
-        latest = self.session.scalar(
-            select(AuditLog)
-            .where(
-                AuditLog.resource_type == "source_file",
-                AuditLog.resource_id == str(source_file_id),
-                AuditLog.action.in_(SOURCE_BACKUP_AUDIT_ACTIONS),
-            )
-            .order_by(AuditLog.id.desc())
-            .limit(1)
+    def _has_source_backup_audit(
+        self, source_file_id: int, safety_context: _SafetyContext
+    ) -> bool:
+        latest = safety_context.latest_backup_audits_by_source_file_id.get(
+            source_file_id
         )
         return latest is not None and latest.result == AuditResult.SUCCESS
 

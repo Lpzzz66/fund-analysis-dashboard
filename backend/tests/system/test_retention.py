@@ -4,6 +4,9 @@ import hashlib
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
 from app.config import get_settings
 from app.db.base import AuditResult, ImportBatchStatus, JobStatus, ValuationStatus
 from app.db.models import (
@@ -16,7 +19,6 @@ from app.db.models import (
     ValuationVersion,
 )
 from app.system.retention import RetentionService
-from sqlalchemy.orm import Session
 
 
 def _source(
@@ -206,6 +208,83 @@ def test_cleanup_skips_review_failed_locked_and_unbacked_files(
             "unbacked.xlsx",
         ]
     )
+
+
+def test_cleanup_batches_safety_data_for_multiple_candidates(
+    session: Session, tmp_path: Path
+) -> None:
+    deletable = _source(session, tmp_path, "deletable.xlsx")
+    review = _source(session, tmp_path, "review-batched.xlsx")
+    active_task = _source(session, tmp_path, "active-task.xlsx")
+    _backup_audit(session, deletable)
+
+    fund = Fund(standard_name="批量复核产品", status="active")
+    session.add(fund)
+    session.flush()
+    session.add(
+        ValuationVersion(
+            fund_id=fund.id,
+            valuation_date=date(2025, 8, 26),
+            version_no=1,
+            source_file_id=review.id,
+            status=ValuationStatus.PENDING_REVIEW,
+        )
+    )
+    batch = ImportBatch(
+        source_type="upload",
+        status=ImportBatchStatus.PROCESSING,
+        file_count=1,
+    )
+    session.add(batch)
+    session.flush()
+    session.add(
+        ImportBatchFile(
+            batch_id=batch.id,
+            source_file_id=active_task.id,
+            duplicate=False,
+        )
+    )
+    session.add(
+        BackgroundJob(
+            job_type="process_import_batch",
+            resource_id=str(batch.id),
+            status=JobStatus.RUNNING,
+        )
+    )
+    session.flush()
+
+    select_statements: list[str] = []
+
+    def count_selects(
+        _conn: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            select_statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", count_selects)
+    try:
+        result = RetentionService(session, storage_root=tmp_path).run(
+            as_of=date(2026, 8, 26), dry_run=False
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", count_selects)
+
+    assert len(select_statements) == 5
+    assert result.candidate_count == 3
+    assert result.deleted_count == 1
+    assert result.skipped_reasons == {
+        "pending_review_reference": 1,
+        "active_task_reference": 1,
+    }
+    assert not (tmp_path / "deletable.xlsx").exists()
+    assert (tmp_path / "review-batched.xlsx").exists()
+    assert (tmp_path / "active-task.xlsx").exists()
 
 
 def test_completed_source_backup_audit_allows_delete_but_missing_backup_does_not(
