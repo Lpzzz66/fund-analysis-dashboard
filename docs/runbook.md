@@ -310,9 +310,54 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml up -d api worke
 
 上传、邮件同步、任务失败、复核、发布、撤回、账号管理、备份和清理都应保留审计记录。发生导入失败时先查看批次状态、任务尝试次数、错误编号和 worker 日志，不要直接修改已发布版本或删除原始对象。发生数据争议时先使用原始文件下载接口和审计记录复核，必要时锁定对象，等待管理员决定。
 
+发布、撤回或恢复后会新增 `process_analysis_run`（执行分析运行）后台任务。任务只写触发日期到当前日期的受影响指标，完整历史仅作为收益和公司指数的计算上下文。看板出现 `pending`（等待）时先检查任务是否排队或运行；出现 `stale`（过期）时检查任务错误编号和 `analysis.failed`（分析失败）审计。分析失败不会回滚已审核的发布状态，也不应通过手工改指标表处理；修复数据或规则后应通过原版本生命周期重新触发受控分析。
+
 ## 11. 明确未提供的能力
 
 - 当前没有异地备份服务器或对象存储保护，不能承诺单机损坏后的完整恢复。
 - 当前没有前端容器；Caddy 的前端兜底是 404，不代表前端已经部署。
 - 当前没有会话签名密钥；会话使用数据库令牌摘要，未来改造必须单独设计密钥轮换。
 - 当前没有集中式调度器；生产调度由宿主机 cron（定时任务）调用受测的运维 CLI（命令行入口），不直接引入消息队列。
+
+## 12. 生产初始化与历史迁移
+
+生产首次初始化分为数据库结构、管理员账号、业务目录和历史文件四步。管理员密码只能通过 `POST /api/v1/auth/initialize`（初始化第一个管理员）设置，不能写入 bootstrap（初始化）配置。
+
+### 12.1 Bootstrap（业务目录初始化）
+
+复制 `deploy/bootstrap.example.json` 为生产主机上的受控配置文件，替换示例产品、别名、份额类别、科目映射和风险规则。配置只允许非敏感系统设置；程序会拒绝包含 `password`（密码）、`password_hash`（密码哈希）、`token`（令牌）、`secret`（秘密）等字段的 JSON（结构化配置）。
+
+先预演：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps \
+  -v /etc/fund-dashboard/bootstrap.json:/run/bootstrap/bootstrap.json:ro \
+  -v /etc/fund-dashboard/migration:/run/migration:ro \
+  api python -m app.bootstrap \
+  --config /run/bootstrap/bootstrap.json --dry-run
+```
+
+预演会检查数据库连接、源文件存储根目录、迁移清单格式及清单产品标签是否被配置中的产品名称或别名覆盖；它只读取迁移清单元数据，不读取、移动或删除历史源目录。预演确认无误后，使用相同配置执行正式初始化：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps \
+  -v /etc/fund-dashboard/bootstrap.json:/run/bootstrap/bootstrap.json:ro \
+  -v /etc/fund-dashboard/migration:/run/migration:ro \
+  api python -m app.bootstrap \
+  --config /run/bootstrap/bootstrap.json
+```
+
+默认要求业务目录为空；发现已有产品、别名、份额类别、科目映射或风险规则时会停止。只有确认配置是对现有目录的受控补充时，才显式加 `--allow-existing`。同一份配置重复执行是幂等的，不会重复创建目录记录或审计记录；配置内容改变时必须重新预演并保留变更记录。配置文件不应进入 Git（代码库）或镜像，执行后按主机密钥文件管理策略处理。
+
+### 12.2 历史迁移上线顺序
+
+1. 完成数据库结构升级、管理员初始化和 bootstrap 预演/正式执行。
+2. 在本地对历史目录执行 `python -m app.migration ... --dry-run`，确认 manifest（迁移清单）指纹、主目录候选数量、缺口和 `needs_review`（需要复核）冲突。
+3. 先上传少量样本，检查导入批次、版本校验、产品识别、日期和原始文件下载；确认看板只出现已发布版本后再继续。
+4. 处理报告列出的同日不同哈希文件。当前已知六组 gz（归档目录）冲突必须人工决定，不得通过文件名或自动覆盖选择。
+5. 使用同一份未变化 manifest 断点续传主目录候选。每个文件上传前会重新核验大小和 SHA-256（安全哈希）；源目录始终只读。
+6. 导入完成后按产品和日期抽样，核对覆盖率、缺口、复核队列和失败任务，再由授权人员逐批发布。
+
+迁移失败时优先修复配置、网络或单项任务后从 manifest 续传，不删除数据库记录或源文件。已经上传但未发布的数据不进入看板；错误版本通过复核/拒绝/修订流程处理。数据库恢复不包含源文件，源文件仍需单独的成功备份。
