@@ -178,6 +178,10 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `POST /api/v1/imports/{batch_id}/files`（接收单个 `.xls`（老式 Excel）或 `.xlsx`（新式 Excel）文件）。
 - `POST /api/v1/imports/{batch_id}/complete`（完成上传并创建 `background_job`（后台任务））。
 - `GET /api/v1/imports/{batch_id}`（查看批次、文件关联和任务状态）。
+- `GET /api/v1/imports`（按来源、状态和分页查询导入批次）。
+- `POST /api/v1/imports/{batch_id}/retry`（重置技术失败批次并重新排队）。
+- `GET /api/v1/imports/{batch_id}/validations`（查询该批次产生的版本校验结果）。
+- `GET /api/v1/imports/{batch_id}/source/{source_file_id}`（经权限和审计后下载原始文件）。
 
 首期默认单文件上限为 20 MB（兆字节）。上传文件先写配置的临时目录，校验扩展名和文件头后计算 SHA-256（安全哈希），正式存储使用随机对象名；重复哈希返回幂等结果并只新增批次关联。当前后台任务已接入 Excel 解析、标准化落库和校验：任务处理器按原始文件幂等创建估值版本，未知产品或日期进入复核审计，阻断校验结果不会进入看板。
 
@@ -192,6 +196,8 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `POST /api/v1/valuations/{version_id}/publish|reject|revoke|restore`（版本生命周期操作）。
 
 看板查询只读取 `published`（已发布）版本；未发布、待复核、已替代和已撤回版本不会进入看板结果。当前分析结果仍按请求即时计算，尚未持久化公司指标和风险事件。
+
+导入任务状态返回尝试次数、租约时间、结束时间、错误编号和是否可重试。独立 worker（任务进程）通过 `python -m app.worker` 串行领取数据库任务；领取使用独立短事务，解析业务写入若发现租约已失效会整体回滚，旧 worker 不能提交结果。
 
 ### `GET /api/v1/imports/{import_id}/validations`（校验结果）
 
