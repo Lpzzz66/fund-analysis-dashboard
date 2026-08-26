@@ -80,11 +80,17 @@ def test_maintenance_records_failure_without_exception_text_or_secret() -> None:
         assert "sensitive-value-not-returned" not in str(result.as_dict())
         audit = session.query(AuditLog).one()
         assert audit.result == AuditResult.FAILURE
+        # The exception class is recorded for log-grepping; the full
+        # traceback stays in the server log so the audit row cannot absorb
+        # sensitive str(exc) content.
         assert audit.summary == {
             "command": "database-backup",
             "status": "failed",
             "error_code": "maintenance_failed",
+            "error_class": "RuntimeError",
         }
+        # Secret from the underlying exception must not leak through audit.
+        assert "sensitive-value-not-returned" not in str(audit.summary)
     finally:
         session.close()
         engine.dispose()

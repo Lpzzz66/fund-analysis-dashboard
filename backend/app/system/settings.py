@@ -73,8 +73,8 @@ def validate_updates(values: dict[str, object]) -> dict[str, object]:
         if definition.kind == "int":
             if isinstance(value, bool) or not isinstance(value, int):
                 raise SystemSettingsError(f"invalid_type:{key}")
-            assert definition.minimum is not None
-            assert definition.maximum is not None
+            if definition.minimum is None or definition.maximum is None:
+                raise SystemSettingsError(f"misconfigured_setting:{key}")
             if not definition.minimum <= value <= definition.maximum:
                 raise SystemSettingsError(f"out_of_range:{key}")
             normalized[key] = value

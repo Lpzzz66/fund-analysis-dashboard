@@ -129,14 +129,26 @@ class MaintenanceService:
         except (MailConfigurationError, MailConnectionError):
             self.session.rollback()
             status, summary, error_code = "failed", {}, "mail_not_available"
-        except Exception:  # noqa: BLE001 - maintenance failures are audited safely
+        except Exception as exc:  # noqa: BLE001 - maintenance failures are audited safely
             self.session.rollback()
             status, summary, error_code = "failed", {}, "maintenance_failed"
+            # Record the exception class so operators can grep server logs by
+            # it without the audit row absorbing potentially-secret str(exc)
+            # content. The full traceback stays in the server log.
+            error_class = type(exc).__name__
+            error_traceback = ""
+        else:
+            error_class = ""
+            error_traceback = ""
 
         result = MaintenanceResult(command, status, summary, error_code)
         audit_summary: dict[str, object] = {"command": command, "status": status}
         if status == "failed":
             audit_summary["error_code"] = error_code or "maintenance_failed"
+            if error_class:
+                audit_summary["error_class"] = error_class
+            if error_traceback:
+                audit_summary["error_traceback"] = error_traceback
         else:
             audit_summary.update(summary)
         self.session.add(
