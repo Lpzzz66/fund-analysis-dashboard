@@ -7,9 +7,6 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.bootstrap import (
     BootstrapError,
     load_config,
@@ -27,6 +24,8 @@ from app.db.models import (
     SubjectMapping,
 )
 from app.db.session import create_engine
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()

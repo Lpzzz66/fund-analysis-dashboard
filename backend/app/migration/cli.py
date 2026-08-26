@@ -44,9 +44,13 @@ def main(argv: list[str] | None = None) -> int:
 
     transport = None
     if not args.dry_run:
+        session_token = os.getenv("MIGRATION_TOKEN")
+        if not session_token:
+            print("错误：上传模式需要 MIGRATION_TOKEN（登录会话值）")
+            return 2
         transport = HttpImportTransport(
             args.base_url,
-            token=os.getenv("MIGRATION_TOKEN"),
+            token=session_token,
         )
     try:
         result = run_migration(

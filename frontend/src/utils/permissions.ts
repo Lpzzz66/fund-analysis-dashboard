@@ -1,7 +1,7 @@
 import type { UserRole } from "./constants";
 
 /**
- * Permission model mirrors docs/01-产品设计基线 §2 角色矩阵.
+ * Permission model mirrors the role matrix in docs/产品与功能范围.md.
  * viewer: read-only, no write buttons anywhere.
  * operator: + upload/import, review/publish, maintain funds/subjects/rules, read audit.
  * admin: everything incl. user management & system settings.

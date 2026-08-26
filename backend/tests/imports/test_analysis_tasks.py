@@ -1,9 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.db.base import AnalysisRunStatus, JobStatus, RiskSeverity, ValuationStatus
 from app.db.models import (
     AnalysisRun,
@@ -19,6 +16,8 @@ from app.db.models import (
 )
 from app.imports.tasks import claim_next_job, process_next_job
 from app.publishing import PublishingService
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 def _published_history(session: Session) -> tuple[Fund, tuple[ValuationVersion, ...]]:

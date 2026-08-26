@@ -3,15 +3,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.auth.dependencies import get_db
 from app.config import get_settings
 from app.db.base import Base
 from app.db.models import AuditLog, BackgroundJob
 from app.db.session import create_engine
 from app.system.health import operational_summary, record_worker_heartbeat
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def _create_app():

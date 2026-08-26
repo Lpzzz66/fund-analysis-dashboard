@@ -1,9 +1,8 @@
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.auth.service import AuthService
 from app.db.base import UserRole, UserStatus
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 @pytest.mark.security

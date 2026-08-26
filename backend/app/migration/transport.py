@@ -11,6 +11,8 @@ from typing import BinaryIO, Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from app.auth.dependencies import SESSION_COOKIE_NAME
+
 
 @dataclass(frozen=True, slots=True)
 class UploadReceipt:
@@ -46,7 +48,7 @@ class HttpTransportError(RuntimeError):
 
 
 class HttpImportTransport:
-    """Call the official import batch endpoints without exposing local paths."""
+    """Call import endpoints with the same session cookie as the web client."""
 
     def __init__(
         self,
@@ -132,7 +134,9 @@ class HttpImportTransport:
             "Content-Length": str(len(body)),
         }
         if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+            # The API deliberately has one authentication contract: fund_session.
+            # Migration uses a short-lived value obtained from an authenticated login.
+            headers["Cookie"] = f"{SESSION_COOKIE_NAME}={self.token}"
         response = self._request("POST", self.base_url + path, headers, body)
         if not 200 <= response.status_code < 300:
             raise HttpTransportError(f"{operation}_http_{response.status_code}")

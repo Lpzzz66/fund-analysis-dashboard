@@ -4,9 +4,6 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 from app.auth.service import AuthService
 from app.config import get_settings
 from app.db.base import SourceType
@@ -17,6 +14,8 @@ from app.imports.storage import (
     UnsafeStoragePathError,
     resolve_in_root,
 )
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from .conftest import make_xlsx_bytes
 

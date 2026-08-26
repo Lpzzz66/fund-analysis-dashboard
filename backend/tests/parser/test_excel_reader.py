@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
-
 from app.parser.excel_reader import WorkbookLimitError, read_workbook
+from openpyxl import Workbook
 
 
 def _save_workbook(

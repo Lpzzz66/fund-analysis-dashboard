@@ -8,13 +8,15 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from tools.valuation_inventory.dedup import DedupGroup, DedupResult, GroupMember
-from tools.valuation_inventory.scanner import ScanResult
-
+from app.auth.dependencies import SESSION_COOKIE_NAME
+from app.migration.cli import main
 from app.migration.inventory import build_inventory, classify_candidates
 from app.migration.manifest import MigrationManifest
 from app.migration.runner import run_migration
 from app.migration.transport import HttpImportTransport, HttpResponse, UploadReceipt
+
+from tools.valuation_inventory.dedup import DedupGroup, DedupResult, GroupMember
+from tools.valuation_inventory.scanner import ScanResult
 
 
 @dataclass(frozen=True)
@@ -334,7 +336,7 @@ def test_gz_only_candidate_is_uploaded_and_completes_batch(tmp_path: Path) -> No
     assert result.ok is True
 
 
-def test_http_transport_is_injectable_and_sends_only_basename() -> None:
+def test_http_transport_uses_session_cookie_and_sends_only_basename() -> None:
     requests: list[tuple[str, str, dict[str, str], bytes]] = []
 
     def request(
@@ -363,7 +365,37 @@ def test_http_transport_is_injectable_and_sends_only_basename() -> None:
         for *_, body in requests
     )
     assert 'filename="估值表.xls"' in requests[1][3].decode("utf-8")
-    assert requests[1][2]["Authorization"] == "Bearer test-token"
+    assert all(
+        request_headers.get("Cookie") == f"{SESSION_COOKIE_NAME}=test-token"
+        for _, _, request_headers, _ in requests
+    )
+    assert all(
+        "Authorization" not in request_headers for _, _, request_headers, _ in requests
+    )
+
+
+def test_migration_cli_requires_session_token_for_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    monkeypatch.delenv("MIGRATION_TOKEN", raising=False)
+
+    result = main(
+        [
+            "--root",
+            str(source_root),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--base-url",
+            "https://example.invalid",
+        ]
+    )
+
+    assert result == 2
+    assert "MIGRATION_TOKEN" in capsys.readouterr().out
 
 
 def test_report_does_not_accept_absolute_manifest_paths() -> None:
