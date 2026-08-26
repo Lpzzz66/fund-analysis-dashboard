@@ -89,6 +89,12 @@ def _set_session_cookie(request: Request, response: Response, raw_token: str) ->
     )
 
 
+@router.get("/status")
+def authentication_status(session: DatabaseSession) -> dict[str, object]:
+    initialized = session.scalar(select(User.id).limit(1)) is not None
+    return {"data": {"initialized": initialized}}
+
+
 @router.post("/initialize", status_code=status.HTTP_201_CREATED)
 def initialize(
     payload: InitializeRequest,

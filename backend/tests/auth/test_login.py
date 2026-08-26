@@ -24,6 +24,42 @@ class _RecordingPasswordHasher:
 
 
 @pytest.mark.security
+def test_auth_status_reports_uninitialized_without_creating_session(
+    client: TestClient,
+    app_and_engine: tuple[object, object],
+) -> None:
+    response = client.get("/api/v1/auth/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"data": {"initialized": False}}
+    assert "set-cookie" not in response.headers
+    with Session(app_and_engine[1]) as session:
+        assert session.scalars(select(UserSession)).all() == []
+
+
+@pytest.mark.security
+def test_auth_status_reports_initialized_when_any_user_exists(
+    client: TestClient,
+    app_and_engine: tuple[object, object],
+) -> None:
+    client.post(
+        "/api/v1/auth/initialize",
+        json={"username": "admin", "password": "correct horse"},
+    )
+    with Session(app_and_engine[1]) as session:
+        sessions_before = session.scalars(select(UserSession)).all()
+
+    response = TestClient(client.app).get("/api/v1/auth/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"data": {"initialized": True}}
+    assert "set-cookie" not in response.headers
+    with Session(app_and_engine[1]) as session:
+        sessions_after = session.scalars(select(UserSession)).all()
+    assert len(sessions_after) == len(sessions_before)
+
+
+@pytest.mark.security
 def test_initialize_first_admin_and_reject_second(client: TestClient) -> None:
     first = client.post(
         "/api/v1/auth/initialize",
