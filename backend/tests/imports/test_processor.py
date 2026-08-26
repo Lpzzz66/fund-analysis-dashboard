@@ -2,22 +2,24 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from openpyxl import Workbook
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session
+
 from app.auth.service import AuthService
 from app.db.base import SourceType, ValuationStatus
 from app.db.models import (
     AccountSubjectDaily,
     Fund,
+    FundAlias,
     FundDailySnapshot,
     PositionDaily,
     SubjectMapping,
     ValuationVersion,
 )
-from app.imports.processor import process_import_batch
+from app.imports.processor import _product_aliases, _resolve_fund, process_import_batch
 from app.imports.service import ImportService
 from app.imports.tasks import process_next_job
-from openpyxl import Workbook
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 def _valuation_xlsx() -> bytes:
@@ -159,3 +161,52 @@ def test_processor_is_idempotent_for_a_completed_source_file(
         assert first[1] is not None
         assert second.duplicate_files == 1
         assert second.created_versions == ()
+
+
+def test_product_alias_queries_are_constant_for_multiple_funds(
+    app_and_engine: tuple[object, object],
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        funds = [Fund(standard_name=f"产品{i}") for i in range(4)]
+        session.add_all(funds)
+        session.flush()
+        session.add_all(
+            [
+                FundAlias(fund_id=funds[0].id, alias="甲产品"),
+                FundAlias(fund_id=funds[0].id, alias="  A-Product  "),
+                FundAlias(fund_id=funds[1].id, alias="乙产品"),
+                FundAlias(fund_id=funds[2].id, alias="丙产品"),
+            ]
+        )
+        session.flush()
+
+        select_statements: list[str] = []
+
+        def count_selects(
+            _conn: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            if statement.lstrip().upper().startswith("SELECT"):
+                select_statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count_selects)
+        try:
+            aliases = _product_aliases(session)
+            assert aliases == {
+                "产品0": ("甲产品", "  A-Product  "),
+                "产品1": ("乙产品",),
+                "产品2": ("丙产品",),
+                "产品3": (),
+            }
+            assert len(select_statements) == 1
+
+            select_statements.clear()
+            assert _resolve_fund(session, " a-product ") is funds[0]
+            assert len(select_statements) == 1
+        finally:
+            event.remove(engine, "before_cursor_execute", count_selects)

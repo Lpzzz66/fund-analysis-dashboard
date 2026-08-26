@@ -184,27 +184,32 @@ def process_import_batch(
 
 
 def _product_aliases(session: Session) -> dict[str, tuple[str, ...]]:
-    funds = session.scalars(select(Fund).order_by(Fund.id)).all()
-    aliases: dict[str, tuple[str, ...]] = {}
-    for fund in funds:
-        rows = session.scalars(
-            select(FundAlias.alias).where(FundAlias.fund_id == fund.id)
-        ).all()
-        aliases[fund.standard_name] = tuple(rows)
-    return aliases
+    aliases: dict[str, list[str]] = {}
+    rows = session.execute(
+        select(Fund, FundAlias.alias)
+        .outerjoin(FundAlias, FundAlias.fund_id == Fund.id)
+        .order_by(Fund.id, FundAlias.id)
+    )
+    for fund, alias in rows:
+        aliases.setdefault(fund.standard_name, [])
+        if alias is not None:
+            aliases[fund.standard_name].append(alias)
+    return {standard_name: tuple(items) for standard_name, items in aliases.items()}
 
 
 def _resolve_fund(session: Session, product_name: str | None) -> Fund | None:
     if not product_name:
         return None
     normalized = product_name.strip().casefold()
-    for fund in session.scalars(select(Fund)).all():
+    rows = session.execute(
+        select(Fund, FundAlias.alias)
+        .outerjoin(FundAlias, FundAlias.fund_id == Fund.id)
+        .order_by(Fund.id, FundAlias.id)
+    )
+    for fund, alias in rows:
         if fund.standard_name.strip().casefold() == normalized:
             return fund
-        aliases = session.scalars(
-            select(FundAlias.alias).where(FundAlias.fund_id == fund.id)
-        ).all()
-        if any(alias.strip().casefold() == normalized for alias in aliases):
+        if alias is not None and alias.strip().casefold() == normalized:
             return fund
     return None
 
