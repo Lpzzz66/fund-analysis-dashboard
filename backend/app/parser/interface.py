@@ -32,6 +32,7 @@ class ParsedSubject:
     suspension_info: str | None
     is_leaf: bool
     hierarchy_path: tuple[str, ...]
+    source_row: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,9 @@ class ParsedPosition:
     valuation_gain: Decimal | None
     suspension_info: str | None
     source_subject_code: str
+    market: str | None
+    account: str | None
+    source_row: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,7 @@ class ParsedShareClass:
     share_code: str
     share_name: str
     net_assets: Decimal | None
+    paid_in_capital: Decimal | None
     unit_nav: Decimal | None
     cumulative_unit_nav: Decimal | None
     previous_unit_nav: Decimal | None

@@ -346,6 +346,8 @@ def _persist_parsed_version(
                 market_value_weight=item.market_value_weight,
                 valuation_gain=item.valuation_gain,
                 suspension_info=item.suspension_info,
+                source_worksheet=parsed.worksheet,
+                source_row=item.source_row,
             )
         )
     session.add_all(subject_rows)
@@ -354,6 +356,9 @@ def _persist_parsed_version(
             valuation_version_id=version.id,
             security_code=item.security_code,
             security_name=item.security_name,
+            market=item.market,
+            account=item.account,
+            original_subject_code=item.source_subject_code,
             quantity=item.quantity,
             unit_cost=item.unit_cost,
             cost=item.cost,
@@ -362,6 +367,8 @@ def _persist_parsed_version(
             nav_weight=item.nav_weight,
             valuation_gain=item.valuation_gain,
             suspension_info=item.suspension_info,
+            source_worksheet=parsed.worksheet,
+            source_row=item.source_row,
         )
         for item in parsed.positions
     )
@@ -372,6 +379,7 @@ def _persist_parsed_version(
                 valuation_version_id=version.id,
                 share_class_id=share_class.id,
                 net_assets=item.net_assets,
+                paid_in_capital=item.paid_in_capital,
                 unit_nav=item.unit_nav,
                 cumulative_unit_nav=item.cumulative_unit_nav,
                 previous_unit_nav=item.previous_unit_nav,

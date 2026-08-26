@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.db.base import ValidationLevel, ValuationStatus
 from app.parser.interface import ParsedPosition, ParsedShareClass, ParsedValuation
 from app.validation.rules import (
@@ -14,7 +16,6 @@ from app.validation.rules import (
     validate_parsed_valuation,
     validate_values,
 )
-from sqlalchemy.orm import Session
 
 
 def test_asset_liability_balance_reports_info_and_critical() -> None:
@@ -29,8 +30,26 @@ def test_asset_liability_balance_reports_info_and_critical() -> None:
 
 def test_share_assets_and_daily_return_rules_are_decimal_safe() -> None:
     shares = (
-        ParsedShareClass("A", "A", Decimal(40), None, None, None, None),
-        ParsedShareClass("B", "B", Decimal(60), None, None, None, None),
+        ParsedShareClass(
+            share_code="A",
+            share_name="A",
+            net_assets=Decimal(40),
+            paid_in_capital=None,
+            unit_nav=None,
+            cumulative_unit_nav=None,
+            previous_unit_nav=None,
+            daily_return=None,
+        ),
+        ParsedShareClass(
+            share_code="B",
+            share_name="B",
+            net_assets=Decimal(60),
+            paid_in_capital=None,
+            unit_nav=None,
+            cumulative_unit_nav=None,
+            previous_unit_nav=None,
+            daily_return=None,
+        ),
     )
     share_result = check_share_net_assets_total(shares, Decimal(100))
     return_result = check_daily_return(Decimal("1.02"), Decimal(1), Decimal("0.01"))
@@ -53,6 +72,9 @@ def test_position_quantity_times_price_is_warning_when_different() -> None:
         valuation_gain=None,
         suspension_info=None,
         source_subject_code="000001",
+        market=None,
+        account=None,
+        source_row=1,
     )
 
     result = check_position_market_value(position)

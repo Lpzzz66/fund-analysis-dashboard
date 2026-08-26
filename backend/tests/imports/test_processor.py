@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from io import BytesIO
+
+from openpyxl import Workbook
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session
 
 from app.auth.service import AuthService
 from app.db.base import SourceType, ValuationStatus
@@ -10,15 +15,13 @@ from app.db.models import (
     FundAlias,
     FundDailySnapshot,
     PositionDaily,
+    ShareClassDailySnapshot,
     SubjectMapping,
     ValuationVersion,
 )
 from app.imports.processor import _product_aliases, _resolve_fund, process_import_batch
 from app.imports.service import ImportService
 from app.imports.tasks import process_next_job
-from openpyxl import Workbook
-from sqlalchemy import event, select
-from sqlalchemy.orm import Session
 
 
 def _valuation_xlsx() -> bytes:
@@ -43,17 +46,51 @@ def _valuation_xlsx() -> bytes:
             "停牌信息",
         ]
     )
-    sheet.append(["10020101", "测试证券", 10, 10, 100, 100, 11, 110, 110, 10, ""])
+    sheet.append(["1002", "股票投资"])
+    sheet.append(["100201", "上交所_信用账户"])
+    sheet.append(["10020101", "股票成本_上交所_信用账户"])
+    sheet.append(["10020101600001", "测试证券", 10, 10, 100, 100, 11, 110, 110, 10, ""])
     sheet.append(["资产类合计", "", "", "", "", "", "", 100, "", "", ""])
     sheet.append(["负债类合计", "", "", "", "", "", "", 0, "", "", ""])
     sheet.append(["基金资产净值", "", "", "", "", "", "", 100, "", "", ""])
-    sheet.append(["基金资产净值:A类", "", "", "", "", "", "", 100, "", "", ""])
+    share_code = "XY0001千金一号A类"
+    sheet.append(
+        [
+            f"基金资产净值:{share_code}",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            100,
+            "",
+            "",
+            "",
+        ]
+    )
+    sheet.append(
+        [
+            f"实收资本:{share_code}",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            80,
+            "",
+            "",
+            "",
+        ]
+    )
     sheet.append(["基金单位净值", 1])
-    sheet.append(["基金单位净值:A类", 1])
+    sheet.append([f"基金单位净值:{share_code}", 1])
     sheet.append(["累计单位净值", 1])
-    sheet.append(["累计单位净值:A类", 1])
+    sheet.append([f"累计单位净值:{share_code}", 1])
     sheet.append(["昨日单位净值", 0.99])
     sheet.append(["净值日增长率(%)", 1.010101])
+    sheet.append([f"净值日增长率:{share_code}(%)", 1.010101])
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -103,13 +140,28 @@ def test_processor_persists_version_snapshot_positions_and_validation(
         )
         subject = session.scalar(
             select(AccountSubjectDaily).where(
-                AccountSubjectDaily.valuation_version_id == version.id
+                AccountSubjectDaily.valuation_version_id == version.id,
+                AccountSubjectDaily.raw_subject_code == "10020101600001",
+            )
+        )
+        share_snapshot = session.scalar(
+            select(ShareClassDailySnapshot).where(
+                ShareClassDailySnapshot.valuation_version_id == version.id
             )
         )
         assert snapshot.net_asset_value == 100
         assert position.market_value == 110
+        assert position.market == "上交所"
+        assert position.account == "信用账户"
+        assert position.original_subject_code == "10020101600001"
+        assert position.source_worksheet == "估值表"
+        assert position.source_row == 8
         assert subject.standard_category == "股票"
         assert subject.include_in_holdings is True
+        assert subject.source_worksheet == "估值表"
+        assert subject.source_row == 8
+        assert share_snapshot.paid_in_capital == 80
+        assert share_snapshot.daily_return == Decimal("0.01010101")
 
 
 def test_processor_treats_non_valuation_workbook_as_ignored(

@@ -27,14 +27,35 @@ SUMMARY_LABELS = {
     "净值日增长率(%)": "daily_return",
     "净值年增长率(%)": "ytd_return",
     "净值季增长率(%)": "qtd_return",
+    "净值季度增长率(%)": "qtd_return",
     "净值月增长率(%)": "mtd_return",
     "净值周增长率(%)": "wtd_return",
     "累计净值增长率": "cumulative_return",
     "累计派现现金额": "cumulative_payout",
+    "累计派现金额": "cumulative_payout",
     "今日可用头寸": "available_headroom",
 }
 
 SUMMARY_BASES = tuple(SUMMARY_LABELS)
+SHARE_CLASS_LABELS = (
+    ("基金资产净值", "net_assets"),
+    ("实收资本金额", "paid_in_capital"),
+    ("实收资本", "paid_in_capital"),
+    ("基金单位净值", "unit_nav"),
+    ("累计单位净值", "cumulative_unit_nav"),
+    ("昨日单位净值", "previous_unit_nav"),
+    ("净值日增长率", "daily_return"),
+)
+MARKET_NAMES = (
+    "银行间市场",
+    "上交所",
+    "深交所",
+    "北交所",
+    "沪港通",
+    "深港通",
+    "港股通",
+)
+ACCOUNT_PATTERN = re.compile(r"(?:^|[_/\\\s-])([^_/\\\s-]*账户)(?=$|[_/\\\s-])")
 
 
 class ParseError(ValueError):
@@ -63,8 +84,9 @@ class ValuationParser:
         summary_rows = self._read_summary_rows(worksheet, header_row)
         summary = self._summary_values(summary_rows, worksheet.name, columns)
         subjects = self._read_subjects(worksheet, header_row, columns, summary_rows)
+        subjects_by_code = {subject.code: subject for subject in subjects}
         positions = tuple(
-            self._to_position(subject)
+            self._to_position(subject, subjects_by_code)
             for subject in subjects
             if subject.is_leaf
             and subject.quantity is not None
@@ -173,10 +195,11 @@ class ValuationParser:
         candidates = tuple(sorted(set(matches) | set(filename_candidates)))
         return valuation_date, None, candidates
 
-    @staticmethod
+    @classmethod
     def _read_summary_rows(
-        worksheet: WorksheetData, header_row: int
+        cls, worksheet: WorksheetData, header_row: int
     ) -> list[tuple[int, str, tuple[object, ...]]]:
+        summary_labels = {normalize_label(base) for base in SUMMARY_BASES}
         rows: list[tuple[int, str, tuple[object, ...]]] = []
         for row_index, row in enumerate(
             worksheet.rows[header_row + 1 :], header_row + 1
@@ -184,18 +207,8 @@ class ValuationParser:
             label = text(row[0] if row else "")
             normalized = normalize_label(label)
             if not label or not (
-                normalized in {normalize_label(base) for base in SUMMARY_BASES}
-                or any(
-                    normalized.startswith(normalize_label(base))
-                    and normalized != normalize_label(base)
-                    for base in (
-                        "基金资产净值",
-                        "基金单位净值",
-                        "累计单位净值",
-                        "昨日单位净值",
-                        "净值日增长率(%)",
-                    )
-                )
+                normalized in summary_labels
+                or cls._match_share_class_label(normalized) is not None
             ):
                 continue
             rows.append((row_index, label, row))
@@ -276,7 +289,7 @@ class ValuationParser:
                 continue
             candidates.append((row_index, code, name, row))
         subjects: list[ParsedSubject] = []
-        for index, (_, code, name, row) in enumerate(candidates):
+        for index, (row_index, code, name, row) in enumerate(candidates):
             has_child = any(
                 next_code.startswith(code) and len(next_code) > len(code)
                 for _, next_code, _, _ in candidates[index + 1 :]
@@ -299,6 +312,7 @@ class ValuationParser:
                         for _, parent_code, _, _ in candidates[: index + 1]
                         if code.startswith(parent_code) and parent_code != code
                     ),
+                    source_row=row_index + 1,
                 )
             )
         return subjects
@@ -308,11 +322,16 @@ class ValuationParser:
         column = columns[key]
         return row[column] if column >= 0 and len(row) > column else None
 
-    @staticmethod
-    def _to_position(subject: ParsedSubject) -> ParsedPosition:
+    @classmethod
+    def _to_position(
+        cls,
+        subject: ParsedSubject,
+        subjects_by_code: Mapping[str, ParsedSubject],
+    ) -> ParsedPosition:
         security_code = (
             subject.code[-6:] if subject.code[-6:].isdigit() else subject.code
         )
+        market, account = cls._position_metadata(subject, subjects_by_code)
         return ParsedPosition(
             security_code=security_code,
             security_name=subject.name,
@@ -333,46 +352,83 @@ class ValuationParser:
             valuation_gain=subject.valuation_gain,
             suspension_info=subject.suspension_info,
             source_subject_code=subject.code,
+            market=market,
+            account=account,
+            source_row=subject.source_row,
         )
 
     @staticmethod
+    def _position_metadata(
+        subject: ParsedSubject,
+        subjects_by_code: Mapping[str, ParsedSubject],
+    ) -> tuple[str | None, str | None]:
+        market: str | None = None
+        account: str | None = None
+        ancestor_names = (
+            subjects_by_code[code].name
+            for code in reversed(subject.hierarchy_path)
+            if code in subjects_by_code
+        )
+        for name in ancestor_names:
+            if market is None:
+                market = next((item for item in MARKET_NAMES if item in name), None)
+            if account is None:
+                match = ACCOUNT_PATTERN.search(name)
+                account = match.group(1) if match else None
+            if market is not None and account is not None:
+                break
+        return market, account
+
+    @staticmethod
+    def _match_share_class_label(label: str) -> tuple[str, str] | None:
+        normalized = normalize_label(label)
+        for base, field in SHARE_CLASS_LABELS:
+            prefix = normalize_label(base)
+            if not normalized.startswith(prefix):
+                continue
+            suffix = normalized[len(prefix) :]
+            if not suffix:
+                return None
+            if field == "daily_return":
+                if suffix.startswith("(%)"):
+                    suffix = suffix[3:]
+                elif suffix.endswith("(%)"):
+                    suffix = suffix[:-3]
+                else:
+                    continue
+                if not suffix:
+                    return None
+            return field, suffix
+        return None
+
+    @classmethod
     def _read_share_classes(
+        cls,
         rows: list[tuple[int, str, tuple[object, ...]]],
     ) -> tuple[ParsedShareClass, ...]:
         by_code: dict[str, dict[str, Any]] = {}
         for _, raw_label, row in rows:
-            normalized = normalize_label(raw_label)
-            for base, field in (
-                ("基金资产净值", "net_assets"),
-                ("基金单位净值", "unit_nav"),
-                ("累计单位净值", "cumulative_unit_nav"),
-                ("昨日单位净值", "previous_unit_nav"),
-                ("净值日增长率(%)", "daily_return"),
-            ):
-                prefix = normalize_label(base)
-                if not normalized.startswith(prefix) or normalized == prefix:
-                    continue
-                code = normalized[len(prefix) :]
-                if code.startswith(("：", ":")):
-                    code = code[1:]
-                if not code:
-                    continue
-                item = by_code.setdefault(
-                    code, {"share_code": code, "share_name": code}
-                )
-                raw_value = (
-                    row[7]
-                    if field == "net_assets" and len(row) > 7
-                    else (row[1] if len(row) > 1 else None)
-                )
-                item[field] = (
-                    ratio(raw_value) if field == "daily_return" else decimal(raw_value)
-                )
+            match = cls._match_share_class_label(raw_label)
+            if match is None:
+                continue
+            field, code = match
+            item = by_code.setdefault(code, {"share_code": code, "share_name": code})
+            raw_value = (
+                row[7]
+                if field in {"net_assets", "paid_in_capital"} and len(row) > 7
+                else (row[1] if len(row) > 1 else None)
+            )
+            parsed_value = (
+                ratio(raw_value) if field == "daily_return" else decimal(raw_value)
+            )
+            if field not in item or item[field] is None:
+                item[field] = parsed_value
         return tuple(
             ParsedShareClass(
                 share_code=item["share_code"],
                 share_name=item["share_name"],
                 net_assets=item.get("net_assets"),
+                paid_in_capital=item.get("paid_in_capital"),
                 unit_nav=item.get("unit_nav"),
                 cumulative_unit_nav=item.get("cumulative_unit_nav"),
                 previous_unit_nav=item.get("previous_unit_nav"),

@@ -203,6 +203,8 @@ class AccountSubjectDaily(Base):
     market_value_weight: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     valuation_gain: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     suspension_info: Mapped[str | None] = mapped_column(Text)
+    source_worksheet: Mapped[str | None] = mapped_column(String(255))
+    source_row: Mapped[int | None] = mapped_column(Integer)
 
 
 class PositionDaily(Base):
@@ -218,6 +220,7 @@ class PositionDaily(Base):
     security_name: Mapped[str | None] = mapped_column(String(255))
     market: Mapped[str | None] = mapped_column(String(100))
     account: Mapped[str | None] = mapped_column(String(255))
+    original_subject_code: Mapped[str | None] = mapped_column(String(100))
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
@@ -226,3 +229,5 @@ class PositionDaily(Base):
     nav_weight: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     valuation_gain: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     suspension_info: Mapped[str | None] = mapped_column(Text)
+    source_worksheet: Mapped[str | None] = mapped_column(String(255))
+    source_row: Mapped[int | None] = mapped_column(Integer)

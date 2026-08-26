@@ -2,14 +2,21 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
-from app.db.base import Base
-from app.db.models import Fund, FundDailySnapshot, ValuationVersion
-from app.db.session import create_engine
 from sqlalchemy import Float, Numeric, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from alembic import command
+from app.db.base import Base
+from app.db.models import (
+    AccountSubjectDaily,
+    Fund,
+    FundDailySnapshot,
+    PositionDaily,
+    ValuationVersion,
+)
+from app.db.session import create_engine
 
 
 @pytest.fixture()
@@ -214,6 +221,20 @@ def test_financial_columns_use_numeric_not_float() -> None:
         assert not isinstance(column.type, Float)
 
 
+def test_position_and_subject_source_columns_are_nullable() -> None:
+    expected_nullable_columns = (
+        AccountSubjectDaily.__table__.c.source_worksheet,
+        AccountSubjectDaily.__table__.c.source_row,
+        PositionDaily.__table__.c.original_subject_code,
+        PositionDaily.__table__.c.source_worksheet,
+        PositionDaily.__table__.c.source_row,
+        PositionDaily.__table__.c.market,
+        PositionDaily.__table__.c.account,
+    )
+
+    assert all(column.nullable for column in expected_nullable_columns)
+
+
 def test_alembic_upgrade_creates_initial_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -315,4 +336,61 @@ def test_job_lease_index_migration_is_reversible(
         assert "lease_token" in {
             column["name"] for column in inspector.get_columns("background_job")
         }
+    migrated_engine.dispose()
+
+
+def test_position_source_migration_is_reversible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "position-source-migration.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("APP_ENV", "development")
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    subject_source_columns = {"source_worksheet", "source_row"}
+    position_source_columns = {
+        "original_subject_code",
+        "source_worksheet",
+        "source_row",
+    }
+
+    command.upgrade(config, "head")
+    migrated_engine = create_engine(database_url)
+    with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert subject_source_columns.issubset(
+            {
+                column["name"]
+                for column in inspector.get_columns("account_subject_daily")
+            }
+        )
+        assert position_source_columns.issubset(
+            {column["name"] for column in inspector.get_columns("position_daily")}
+        )
+
+    command.downgrade(config, "0005_analysis_trigger_version")
+    with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert subject_source_columns.isdisjoint(
+            {
+                column["name"]
+                for column in inspector.get_columns("account_subject_daily")
+            }
+        )
+        assert position_source_columns.isdisjoint(
+            {column["name"] for column in inspector.get_columns("position_daily")}
+        )
+
+    command.upgrade(config, "head")
+    with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert subject_source_columns.issubset(
+            {
+                column["name"]
+                for column in inspector.get_columns("account_subject_daily")
+            }
+        )
+        assert position_source_columns.issubset(
+            {column["name"] for column in inspector.get_columns("position_daily")}
+        )
     migrated_engine.dispose()
