@@ -1,0 +1,337 @@
+/* Fund valuation dashboard — global styles.
+ * Financial terminal aesthetic: ink navy chrome, cool paper canvas,
+ * monospace figures, restrained motion. */
+
+:root {
+  --ink: #0f1b2d;
+  --paper: #f6f8fb;
+  --rule: #e3e8f0;
+  --rule-strong: #cfd8e8;
+  --accent: #1f6feb;
+  --amber: #c2740b;
+  --crimson: #d43f3f;
+  --sage: #2f855a;
+  --ink-2: #16273d;
+  --ink-3: #3b4f70;
+  --text-2: #5a6b86;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo,
+    Consolas, monospace;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei",
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers are the language of this terminal — set them in monospace. */
+.num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Sidebar menu: quiet, background-only hover — no transforms on nav. */
+.fd-sider .ant-menu-dark .ant-menu-item:hover {
+  transform: none;
+}
+
+/* Buttons feel responsive on press. */
+.ant-btn {
+  transition: transform 140ms var(--ease-out), background-color 160ms ease,
+    color 160ms ease, border-color 160ms ease;
+}
+.ant-btn:active {
+  transform: scale(0.97);
+}
+
+/* Tables: align numeric columns right by convention. */
+.fd-table .num-cell {
+  text-align: right;
+  font-family: var(--mono);
+}
+
+/* Status ribbon — the signature element of every data page. */
+.fd-ribbon {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.fd-ribbon__cell {
+  padding: 10px 16px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fd-ribbon__cell:last-child {
+  border-right: 0;
+}
+.fd-ribbon__label {
+  font-size: 12px;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+.fd-ribbon__value {
+  font-family: var(--mono);
+  font-size: 18px;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Quality status dot with semantic states. */
+.q-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.q-dot--valid {
+  background: var(--sage);
+}
+.q-dot--warning {
+  background: var(--amber);
+  animation: q-breath 2.4s ease-in-out infinite;
+}
+.q-dot--critical,
+.q-dot--stale {
+  background: var(--crimson);
+}
+.q-dot--pending {
+  background: var(--accent);
+  animation: q-pulse 1.6s ease-in-out infinite;
+}
+.q-dot--partial {
+  background: var(--amber);
+}
+
+@keyframes q-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes q-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(31, 111, 235, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(31, 111, 235, 0);
+  }
+}
+
+/* Section header with optional eyebrow. */
+.fd-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.fd-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+/* Login page — single centered card, no chrome. */
+.fd-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(160deg, #0c1729 0%, var(--ink) 55%, #122036 100%);
+}
+.fd-login__card {
+  width: 380px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 36px 32px 28px;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+}
+.fd-login__brand {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.fd-login__title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+.fd-login__subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0 0 28px;
+}
+
+/* Source link — small inline traceability affordance. */
+.fd-source-link {
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 1px dashed var(--rule-strong);
+}
+.fd-source-link:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Empty state — invitation to act, not a mood. */
+.fd-empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--text-2);
+}
+
+/* Drawer/Modal enter — origin-aware via AntD; just the timing. */
+.ant-modal,
+.ant-drawer-content {
+  transition: transform 240ms var(--ease-out), opacity 240ms ease;
+}
+
+/* Reduced motion: keep color/opacity, drop movement. */
+@media (prefers-reduced-motion: reduce) {
+  .q-dot--warning,
+  .q-dot--pending {
+    animation: none;
+  }
+  .ant-btn:active {
+    transform: none;
+  }
+  .ant-modal,
+  .ant-drawer-content {
+    transition: opacity 200ms ease;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Hover gating for fine-pointer devices only (emil-design-eng). */
+@media (hover: hover) and (pointer: fine) {
+  .fd-source-link:hover {
+    text-decoration: none;
+  }
+}
+
+/* Utility: page container spacing. */
+.fd-page {
+  padding: 20px 24px 40px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+.fd-page__bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.fd-page__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+.fd-page__desc {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 4px 0 0;
+}
+
+/* Inline KPI card. */
+.fd-kpi {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 16px 18px;
+  cursor: default;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.fd-kpi--clickable {
+  cursor: pointer;
+}
+.fd-kpi--clickable:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px -10px rgba(31, 111, 235, 0.5);
+}
+.fd-kpi__label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.fd-kpi__value {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.fd-kpi__sub {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 6px;
+}
+
+/* Filter bar. */
+.fd-filterbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+/* Small muted caption. */
+.fd-caption {
+  font-size: 12px;
+  color: var(--text-2);
+}
