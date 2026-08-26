@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.config import get_settings
 from app.db.base import AuditResult, Base, JobStatus
 from app.db.models import AuditLog, BackgroundJob, SystemState
@@ -14,7 +16,6 @@ from app.system.maintenance import (
     ScheduleConfig,
     summarize_jobs,
 )
-from sqlalchemy.orm import Session
 
 
 def _session() -> tuple[object, Session]:
@@ -122,6 +123,25 @@ def test_persisted_mail_interval_overrides_the_five_minute_default() -> None:
         engine.dispose()
 
 
+def test_persisted_pause_skips_scheduled_mail_sync() -> None:
+    engine, session = _session()
+    settings = replace(get_settings(), database_url="sqlite+pysqlite:///:memory:")
+    try:
+        session.add(SystemState(id=1, settings={"mail_sync_enabled": False}))
+        session.commit()
+
+        result = MaintenanceService(session, settings).run("mail-sync")
+
+        assert result.status == "succeeded"
+        assert result.summary == {
+            "skipped": True,
+            "reason": "mail_sync_paused",
+        }
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_cli_exposes_one_shot_commands_and_safe_retention_default() -> None:
     parser = build_parser()
 
@@ -144,13 +164,14 @@ def test_maintenance_success_is_audited_with_public_summary() -> None:
         service = MaintenanceService(session, settings)
         service._run_job_summary = lambda: {"queue": {"backlog": 0}}  # type: ignore[method-assign]
 
-        result = service.run("job-summary")
+        result = service.run("job-summary", reason="管理员手工检查")
 
         assert result.status == "succeeded"
         assert result.summary == {"queue": {"backlog": 0}}
         audit = session.query(AuditLog).one()
         assert audit.action == "system.maintenance"
         assert audit.result == AuditResult.SUCCESS
+        assert audit.reason == "管理员手工检查"
     finally:
         session.close()
         engine.dispose()

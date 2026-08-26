@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from app.db.base import AuditResult, RiskEventStatus, RiskSeverity
-from app.db.models import AuditLog, Fund, RiskEvent, RiskRule, SystemState
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.db.base import AuditResult, RiskEventStatus, RiskSeverity
+from app.db.models import AuditLog, Fund, RiskEvent, RiskRule, SystemState
 
 
 def _create_user(admin_client: TestClient, username: str, role: str) -> TestClient:
@@ -299,6 +300,58 @@ def test_mail_settings_has_no_persistent_write_endpoint(
         json={"host": "imap.example.test", "password": "secret"},
     )
     assert response.status_code == 405
+
+
+def test_retention_preview_and_confirmed_execution_are_admin_only(
+    admin_client: TestClient,
+    app_and_engine: tuple[object, object],
+) -> None:
+    operator = _create_user(admin_client, "operator-retention", "operator")
+
+    preview = admin_client.post("/api/v1/system/retention/preview")
+    missing_confirmation = admin_client.post(
+        "/api/v1/system/retention/execute",
+        json={"confirmation": "wrong", "reason": "执行到期文件清理"},
+    )
+    missing_reason = admin_client.post(
+        "/api/v1/system/retention/execute",
+        json={"confirmation": "DELETE_EXPIRED_SOURCE_FILES", "reason": "   "},
+    )
+    executed = admin_client.post(
+        "/api/v1/system/retention/execute",
+        json={
+            "confirmation": "DELETE_EXPIRED_SOURCE_FILES",
+            "reason": "执行到期文件清理",
+        },
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["data"]["summary"]["dry_run"] is True
+    assert missing_confirmation.status_code == 422
+    assert missing_reason.status_code == 422
+    assert executed.status_code == 200
+    assert executed.json()["data"]["summary"]["dry_run"] is False
+    assert operator.post("/api/v1/system/retention/preview").status_code == 403
+    assert (
+        operator.post(
+            "/api/v1/system/retention/execute",
+            json={
+                "confirmation": "DELETE_EXPIRED_SOURCE_FILES",
+                "reason": "越权清理",
+            },
+        ).status_code
+        == 403
+    )
+
+    with Session(app_and_engine[1]) as session:
+        audit = session.scalar(
+            select(AuditLog)
+            .where(AuditLog.action == "system.maintenance")
+            .order_by(AuditLog.id.desc())
+        )
+        assert audit is not None
+        assert audit.actor_user_id is not None
+        assert audit.reason == "执行到期文件清理"
 
 
 def test_system_health_is_non_sensitive_and_admin_only(

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from app.db.models import ImportBatch, SourceFile, SourceMessage
+import os
+import stat
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+
+from app.db.models import AuditLog, ImportBatch, SourceFile, SourceMessage
 
 from .conftest import FakeMailbox, make_email, make_xlsx_bytes
 
@@ -22,6 +27,9 @@ def test_settings_are_redacted_and_test_connection_uses_database_dependency(
             "host": "imap.example.test",
             "port": 993,
             "username": "funds@example.test",
+            "credential_source": "environment",
+            "credential_writable": False,
+            "auto_sync_enabled": True,
         }
     }
     assert "test-only-authorisation-code" not in settings.text
@@ -29,6 +37,118 @@ def test_settings_are_redacted_and_test_connection_uses_database_dependency(
     assert connection.json() == {"data": {"connected": True}}
     assert fake_mailbox.connections[-1].selected_readonly is True
     assert fake_mailbox.connections[-1].logged_out is True
+
+
+def test_admin_can_store_authorization_code_without_exposing_it(
+    admin_client: TestClient,
+    app_and_engine: tuple[object, object],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    secret_directory = tmp_path / "mail-secrets"
+    secret_directory.mkdir()
+    secret_path = secret_directory / "imap_password"
+    authorization_code = "new-test-authorisation-code"
+    monkeypatch.delenv("MAIL_IMAP_PASSWORD")
+    monkeypatch.setenv("MAIL_IMAP_PASSWORD_FILE", str(secret_path))
+
+    response = admin_client.put(
+        "/api/v1/mail/credential",
+        json={"authorization_code": authorization_code},
+    )
+    settings = admin_client.get("/api/v1/mail/settings")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": {
+            "configured": True,
+            "credential_source": "secret_file",
+            "credential_writable": True,
+        }
+    }
+    assert authorization_code not in response.text
+    assert secret_path.read_text(encoding="utf-8") == authorization_code
+    if os.name != "nt":
+        assert stat.S_IMODE(secret_path.stat().st_mode) == 0o600
+    assert settings.json()["data"]["credential_source"] == "secret_file"
+    assert authorization_code not in settings.text
+
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "mail.credential_updated")
+        )
+        assert audit is not None
+        assert authorization_code not in str(audit.summary)
+
+
+def test_environment_managed_authorization_code_cannot_be_overwritten(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.put(
+        "/api/v1/mail/credential",
+        json={"authorization_code": "replacement-code"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "mail_credential_managed_by_environment"
+    assert "replacement-code" not in response.text
+
+
+def test_authorization_code_update_requires_configured_writable_directory(
+    admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MAIL_IMAP_PASSWORD")
+    monkeypatch.setenv(
+        "MAIL_IMAP_PASSWORD_FILE", str(tmp_path / "missing" / "imap_password")
+    )
+
+    response = admin_client.put(
+        "/api/v1/mail/credential",
+        json={"authorization_code": "must-not-be-written"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "mail_credential_file_unavailable"
+    assert "must-not-be-written" not in response.text
+
+
+def test_invalid_authorization_code_is_redacted_from_validation_response(
+    admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    secret_directory = tmp_path / "mail-secrets"
+    secret_directory.mkdir()
+    monkeypatch.delenv("MAIL_IMAP_PASSWORD")
+    monkeypatch.setenv(
+        "MAIL_IMAP_PASSWORD_FILE", str(secret_directory / "imap_password")
+    )
+    invalid_code = "x" * 257
+
+    response = admin_client.put(
+        "/api/v1/mail/credential",
+        json={"authorization_code": invalid_code},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "invalid_mail_credential"
+    assert invalid_code not in response.text
+
+
+def test_authorization_code_update_rejects_unknown_fields_without_echo(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.put(
+        "/api/v1/mail/credential",
+        json={"authorization_code": "hidden-code", "unexpected": True},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "invalid_mail_credential"
+    assert "hidden-code" not in response.text
 
 
 def test_sync_counts_attachments_and_sync_runs_return_a_list(
@@ -144,8 +264,24 @@ def test_operator_can_sync_but_viewer_cannot_access_mail(
     operator_test = operator.post("/api/v1/mail/test-connection")
     viewer_settings = viewer.get("/api/v1/mail/settings")
     viewer_sync_runs = viewer.get("/api/v1/mail/sync-runs")
+    paused = admin_client.post("/api/v1/mail/pause")
+    operator_sync_while_paused = operator.post("/api/v1/mail/sync")
+    operator_pause = operator.post("/api/v1/mail/pause")
+    operator_credential = operator.put(
+        "/api/v1/mail/credential", json={"authorization_code": "forbidden-code"}
+    )
+    viewer_resume = viewer.post("/api/v1/mail/resume")
+    resumed = admin_client.post("/api/v1/mail/resume")
 
     assert operator_sync.status_code == 200
     assert operator_test.status_code == 403
     assert viewer_settings.status_code == 403
     assert viewer_sync_runs.status_code == 403
+    assert paused.status_code == 200
+    assert paused.json()["data"]["auto_sync_enabled"] is False
+    assert operator_sync_while_paused.status_code == 200
+    assert operator_pause.status_code == 403
+    assert operator_credential.status_code == 403
+    assert viewer_resume.status_code == 403
+    assert resumed.status_code == 200
+    assert resumed.json()["data"]["auto_sync_enabled"] is True

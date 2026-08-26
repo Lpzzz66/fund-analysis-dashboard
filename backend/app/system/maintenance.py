@@ -23,6 +23,7 @@ from app.mail import (
 from app.system.backup import BackupService
 from app.system.health import queue_summary
 from app.system.retention import RetentionService
+from app.system.settings import mail_sync_enabled
 
 MAINTENANCE_COMMANDS = (
     "mail-sync",
@@ -117,6 +118,7 @@ class MaintenanceService:
         *,
         dry_run: bool = True,
         output_name: str | None = None,
+        reason: str | None = None,
     ) -> MaintenanceResult:
         if command not in MAINTENANCE_COMMANDS:
             raise ValueError(f"unsupported maintenance command: {command}")
@@ -144,6 +146,7 @@ class MaintenanceService:
                 resource_type="maintenance",
                 resource_id=uuid4().hex,
                 summary=audit_summary,
+                reason=reason,
                 result=AuditResult.SUCCESS
                 if status == "succeeded"
                 else AuditResult.FAILURE,
@@ -168,6 +171,8 @@ class MaintenanceService:
         return "succeeded", self._run_job_summary(), None
 
     def _run_mail_sync(self) -> tuple[str, dict[str, object], str | None]:
+        if not mail_sync_enabled(self.session):
+            return "succeeded", {"skipped": True, "reason": "mail_sync_paused"}, None
         mail_settings = MailSettings.from_environment()
         result = MailService.from_app_settings(
             self.session,

@@ -29,6 +29,7 @@ SETTING_DEFINITIONS: dict[str, SettingDefinition] = {
     "task_concurrency": SettingDefinition("int", 1, 16),
     "data_lateness_days": SettingDefinition("int", 0, 30),
     "mail_sync_interval_minutes": SettingDefinition("int", 1, 1440),
+    "mail_sync_enabled": SettingDefinition("bool"),
     "backup_retention_days": SettingDefinition("int", 1, 3650),
     "timezone": SettingDefinition("timezone"),
 }
@@ -37,13 +38,14 @@ DEFAULT_VALUES: dict[str, object] = {
     "task_concurrency": 1,
     "data_lateness_days": 1,
     "mail_sync_interval_minutes": 15,
+    "mail_sync_enabled": True,
     "backup_retention_days": 30,
     "timezone": "Asia/Shanghai",
 }
 
 RUNTIME_NOTE = (
-    "Database-backed values are persisted but are not hot-applied; the worker and "
-    "retention services still read environment settings in the current process."
+    "The mail sync switch is read before every scheduled run. Other database-backed "
+    "values are persisted but are not hot-applied by current worker processes."
 )
 
 
@@ -75,6 +77,11 @@ def validate_updates(values: dict[str, object]) -> dict[str, object]:
             assert definition.maximum is not None
             if not definition.minimum <= value <= definition.maximum:
                 raise SystemSettingsError(f"out_of_range:{key}")
+            normalized[key] = value
+            continue
+        if definition.kind == "bool":
+            if not isinstance(value, bool):
+                raise SystemSettingsError(f"invalid_type:{key}")
             normalized[key] = value
             continue
         if not isinstance(value, str) or not value.strip():
@@ -135,11 +142,20 @@ def update_settings(
     return effective_settings(session, runtime_settings)
 
 
+def mail_sync_enabled(session: Session) -> bool:
+    state = session.get(SystemState, 1)
+    if state is None or not isinstance(state.settings, dict):
+        return True
+    value = state.settings.get("mail_sync_enabled", True)
+    return value if isinstance(value, bool) else True
+
+
 __all__ = [
     "RUNTIME_NOTE",
     "SETTING_DEFINITIONS",
     "SystemSettingsError",
     "effective_settings",
+    "mail_sync_enabled",
     "update_settings",
     "validate_updates",
 ]

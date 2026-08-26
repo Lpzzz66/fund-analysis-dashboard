@@ -63,9 +63,8 @@ services:
       - upload_temp:/var/lib/fund-dashboard/tmp/uploads
       - database_backups:/var/lib/fund-dashboard/backups
       - type: bind
-        source: ${MAIL_IMAP_SECRET_FILE:-/etc/fund-dashboard/imap_password}
-        target: /run/secrets/imap_password
-        read_only: true
+        source: ${MAIL_IMAP_SECRET_DIR:-/etc/fund-dashboard}
+        target: /run/secrets
     expose:
       - "8000"
     networks:
@@ -113,8 +112,8 @@ services:
       - upload_temp:/var/lib/fund-dashboard/tmp/uploads
       - database_backups:/var/lib/fund-dashboard/backups
       - type: bind
-        source: ${MAIL_IMAP_SECRET_FILE:-/etc/fund-dashboard/imap_password}
-        target: /run/secrets/imap_password
+        source: ${MAIL_IMAP_SECRET_DIR:-/etc/fund-dashboard}
+        target: /run/secrets
         read_only: true
     networks:
       - backend

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from app.auth.service import AuthService
 from app.db.base import AuditResult, UserRole
 from app.db.models import AuditLog
 from app.system.health import operational_summary
+from app.system.maintenance import MaintenanceService
 from app.system.settings import (
     RUNTIME_NOTE,
     SystemSettingsError,
@@ -39,6 +40,21 @@ class SystemSettingsPatch(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     settings: dict[str, object] | None = None
+
+
+class RetentionExecutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["DELETE_EXPIRED_SOURCE_FILES"]
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("reason must not be blank")
+        return normalized
 
 
 def _setting_values(payload: SystemSettingsPatch) -> dict[str, object]:
@@ -122,6 +138,35 @@ def system_operations(
     """Return the authenticated maintenance and worker operations summary."""
 
     return {"data": operational_summary(session, request.app.state.settings)}
+
+
+@router.post("/system/retention/preview")
+def preview_source_retention(
+    context: SystemAdmin,
+    request: Request,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    result = MaintenanceService(
+        session,
+        request.app.state.settings,
+        actor_user_id=context.user.id,
+    ).run("source-retention", dry_run=True)
+    return {"data": result.as_dict()}
+
+
+@router.post("/system/retention/execute")
+def execute_source_retention(
+    payload: RetentionExecutionRequest,
+    context: SystemAdmin,
+    request: Request,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    result = MaintenanceService(
+        session,
+        request.app.state.settings,
+        actor_user_id=context.user.id,
+    ).run("source-retention", dry_run=False, reason=payload.reason)
+    return {"data": result.as_dict()}
 
 
 _SENSITIVE_KEY_PARTS = (

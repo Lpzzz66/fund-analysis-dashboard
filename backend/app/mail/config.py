@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
+
+from .credential_store import MailCredentialStoreError, read_mail_credential
 
 
 class MailConfigurationError(ValueError):
@@ -54,13 +55,10 @@ class MailSettings:
 
     @classmethod
     def from_environment(cls) -> MailSettings:
-        password = os.getenv("MAIL_IMAP_PASSWORD", "")
-        password_file = os.getenv("MAIL_IMAP_PASSWORD_FILE")
-        if not password and password_file:
-            try:
-                password = Path(password_file).read_text(encoding="utf-8").strip()
-            except (OSError, UnicodeError) as exc:
-                raise MailConfigurationError("mail_password_unavailable") from exc
+        try:
+            password = read_mail_credential()
+        except MailCredentialStoreError as exc:
+            raise MailConfigurationError(str(exc)) from exc
 
         return cls(
             host=os.getenv("MAIL_IMAP_HOST", "").strip(),

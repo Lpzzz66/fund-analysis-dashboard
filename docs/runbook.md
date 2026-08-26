@@ -46,8 +46,8 @@ Compose（容器编排）只使用四个服务，不引入 Redis（缓存/队列
 cd /opt/fund-dashboard
 cp deploy/.env.example deploy/.env
 chmod 600 deploy/.env
-install -d -m 700 /etc/fund-dashboard
-install -m 600 /dev/null /etc/fund-dashboard/imap_password
+install -d -m 700 -o 10001 -g 10001 /etc/fund-dashboard
+install -m 600 -o 10001 -g 10001 /dev/null /etc/fund-dashboard/imap_password
 ```
 
 编辑 `deploy/.env`，至少替换以下值：
@@ -57,16 +57,16 @@ install -m 600 /dev/null /etc/fund-dashboard/imap_password
 - `POSTGRES_PASSWORD`：随机数据库密码。
 - `DATABASE_URL`：与上面的数据库账号、密码和库名一致；密码中的 `@`、`:`、`/` 等字符必须 URL-encode（URL 编码）。
 - `MAIL_IMAP_USERNAME`：QQ 邮箱账号。
-- `MAIL_IMAP_SECRET_FILE`：宿主机授权码文件路径，默认 `/etc/fund-dashboard/imap_password`。
+- `MAIL_IMAP_SECRET_DIR`：宿主机受控秘密目录，默认 `/etc/fund-dashboard`；API（接口服务）可在其中原子更新 `imap_password`，worker（任务进程）只读挂载该目录。
 
-把 QQ 邮箱授权码写入受控文件，不写入仓库、Caddy 配置、API 响应或 shell 历史：
+首次部署可直接把 QQ 邮箱授权码写入受控文件；也可以部署完成后由管理员在网页中更新。授权码不写入仓库、Caddy 配置、数据库、API 响应或 shell 历史：
 
 ```bash
 editor /etc/fund-dashboard/imap_password
 chmod 600 /etc/fund-dashboard/imap_password
 ```
 
-`MAIL_IMAP_PASSWORD` 保持为空时，应用从容器内 `/run/secrets/imap_password` 读取授权码。数据库密码由服务器 `deploy/.env` 注入 `POSTGRES_PASSWORD`、`DATABASE_URL` 和备份进程所需的 `PGPASSWORD`。不要把展开后的 `docker compose config` 输出提交或发送给他人。
+`MAIL_IMAP_PASSWORD` 保持为空时，应用从容器内 `/run/secrets/imap_password` 读取授权码。只有 API（接口服务）对该目录具有写权限，worker（任务进程）保持只读。若把授权码直接放入 `MAIL_IMAP_PASSWORD`，网页更新接口会拒绝覆盖。数据库密码由服务器 `deploy/.env` 注入 `POSTGRES_PASSWORD`、`DATABASE_URL` 和备份进程所需的 `PGPASSWORD`。不要把展开后的 `docker compose config` 输出提交或发送给他人。
 
 当前账号会话是数据库保存的随机不透明令牌，数据库只保存令牌摘要；代码没有签名会话密钥变量，因此本阶段不添加一个实际上不会生效的 `SESSION_SECRET`。若未来改为签名令牌，必须新增明确的环境/受控 secrets（秘密文件）读取配置，并在变更中补充轮换策略。
 
@@ -193,7 +193,9 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
 
 `source-retention`（源文件清理）默认是 dry-run（预演），只有明确指定 `--apply`（执行）才会删除通过现有安全检查的原始对象。命令退出码为 0 表示成功，退出码为 1 表示该次维护失败；失败原因使用稳定 error code（错误编号），不会把密码、token（令牌）或数据库连接串写入输出。
 
-默认调度建议如下：mail-sync（邮件同步）每 5 分钟、database-backup（数据库备份）每天 `02:30`、source-retention（源文件清理）每天 `03:30` 且位于备份之后、health check（健康检查）每 1 分钟。宿主机 cron（定时任务）示例：
+网页端提供相同安全语义：管理员先调用 `/api/v1/system/retention/preview` 查看预演，再调用 `/api/v1/system/retention/execute` 执行。执行时必须输入固定确认短语 `DELETE_EXPIRED_SOURCE_FILES` 和操作原因。网页接口仍使用既有备份、待复核、失败任务、审计锁和路径安全保护，不提供强制绕过选项。
+
+默认调度建议如下：mail-sync（邮件同步）每 5 分钟、database-backup（数据库备份）每天 `02:30`、source-retention（源文件清理）每天 `03:30` 且位于备份之后、health check（健康检查）每 1 分钟。管理员暂停自动邮件同步后，定时 `mail-sync` 命令会记录安全跳过；管理员和业务员仍可在网页中立即同步。宿主机 cron（定时任务）示例：
 
 ```cron
 */5 * * * * cd /opt/fund-dashboard && docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps api python -m app.maintenance_cli mail-sync >> /var/log/fund-dashboard-maintenance.log 2>&1

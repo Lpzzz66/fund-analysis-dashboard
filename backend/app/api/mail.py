@@ -8,14 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
+from app.auth.service import AuthService
 from app.config import Settings
 from app.db.base import UserRole
 from app.mail import (
     MailConfigurationError,
     MailConnectionError,
+    MailCredentialStoreError,
     MailService,
     MailSettings,
+    mail_credential_status,
+    write_mail_credential,
 )
+from app.system.settings import mail_sync_enabled, update_settings
 
 router = APIRouter(prefix="/api/v1/mail", tags=["mail"])
 
@@ -44,19 +49,107 @@ def _service(request: Request, session: Session, settings: MailSettings) -> Mail
 
 
 @router.get("/settings")
-def get_settings(_: MailReader) -> dict[str, object]:
+def get_settings(_: MailReader, session: DatabaseSession) -> dict[str, object]:
+    credential = mail_credential_status()
     try:
         settings = _mail_settings()
     except MailConfigurationError:
-        return {"data": {"configured": False, "host": "", "port": 993, "username": ""}}
+        return {
+            "data": {
+                "host": "",
+                "port": 993,
+                "username": "",
+                **credential.as_dict(),
+                "configured": False,
+                "auto_sync_enabled": mail_sync_enabled(session),
+            }
+        }
     return {
         "data": {
-            "configured": settings.configured,
             "host": settings.host,
             "port": settings.port,
             "username": settings.username,
+            **credential.as_dict(),
+            "configured": settings.configured,
+            "auto_sync_enabled": mail_sync_enabled(session),
         }
     }
+
+
+@router.put("/credential")
+async def update_credential(
+    request: Request,
+    context: MailAdmin,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_mail_credential") from None
+    if not isinstance(payload, dict) or set(payload) != {"authorization_code"}:
+        raise HTTPException(status_code=422, detail="invalid_mail_credential")
+    raw_code = payload.get("authorization_code")
+    if not isinstance(raw_code, str):
+        raise HTTPException(status_code=422, detail="invalid_mail_credential")
+    authorization_code = raw_code.strip()
+    if not authorization_code or len(authorization_code) > 256:
+        raise HTTPException(status_code=422, detail="invalid_mail_credential")
+    try:
+        status = write_mail_credential(authorization_code)
+    except MailCredentialStoreError as exc:
+        code = str(exc)
+        status_code = 409 if code == "mail_credential_managed_by_environment" else 503
+        raise HTTPException(status_code=status_code, detail=code) from None
+    AuthService(session).record_audit(
+        action="mail.credential_updated",
+        resource_type="mail_settings",
+        resource_id="imap",
+        actor_user_id=context.user.id,
+        summary={"credential_source": status.source},
+    )
+    session.commit()
+    return {"data": status.as_dict()}
+
+
+def _set_auto_sync(
+    enabled: bool,
+    context: AuthContext,
+    request: Request,
+    session: Session,
+) -> dict[str, object]:
+    if mail_sync_enabled(session) != enabled:
+        update_settings(
+            session,
+            request.app.state.settings,
+            {"mail_sync_enabled": enabled},
+        )
+        AuthService(session).record_audit(
+            action="mail.auto_sync_resumed" if enabled else "mail.auto_sync_paused",
+            resource_type="mail_settings",
+            resource_id="imap",
+            actor_user_id=context.user.id,
+            summary={"auto_sync_enabled": enabled},
+        )
+        session.commit()
+    return {"data": {"auto_sync_enabled": enabled}}
+
+
+@router.post("/pause")
+def pause_auto_sync(
+    request: Request,
+    context: MailAdmin,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    return _set_auto_sync(False, context, request, session)
+
+
+@router.post("/resume")
+def resume_auto_sync(
+    request: Request,
+    context: MailAdmin,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    return _set_auto_sync(True, context, request, session)
 
 
 @router.post("/test-connection")

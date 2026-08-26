@@ -280,7 +280,15 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 ### `GET /api/v1/mail/settings`（邮箱设置）
 
-只返回 `configured`（是否已配置）、服务器、端口和用户名等非敏感状态，不返回授权码。邮箱设置只从环境变量或受控密钥文件读取；本期不提供写入数据库的 `PUT` 接口。
+权限：`admin`（系统管理员）或 `operator`（业务员）。只返回 `configured`（是否已配置）、服务器、端口、用户名、`credential_source`（凭据来源）、`credential_writable`（是否允许网页更新）和 `auto_sync_enabled`（自动同步是否开启），不返回授权码。
+
+### `PUT /api/v1/mail/credential`（更新邮箱授权码）
+
+仅 `admin`（系统管理员）。请求只接收 `authorization_code`（授权码，1--256 字符）。授权码原子写入 `MAIL_IMAP_PASSWORD_FILE` 指向的服务器受控文件，权限为 600；不进入数据库、响应、日志或审计摘要。若授权码由 `MAIL_IMAP_PASSWORD` 环境变量直接托管，或受控目录不可写，接口拒绝覆盖。
+
+### `POST /api/v1/mail/pause` 和 `/resume`（暂停或恢复自动同步）
+
+仅 `admin`（系统管理员）。开关保存在现有系统状态中并在每次定时同步前读取；重复操作幂等。暂停只影响定时同步，不阻止管理员或业务员调用“立即同步”。
 
 ### `POST /api/v1/mail/test-connection`（测试连接）
 
@@ -294,7 +302,7 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 返回同步时间、邮件数量、附件数量、重复数量和错误摘要。
 
-当前邮件同步使用标准库 IMAP（邮件接收协议）只读拉取 `INBOX`（收件箱），不删除或移动原邮件。同步按 Message-ID（邮件唯一标识）和附件 SHA-256（安全哈希）幂等；非 `.xls`/`.xlsx` 附件记录为忽略，单封邮件或单个附件失败不会中断后续邮件。附件接收统一调用正式导入服务，邮件接口不会复制 Excel（电子表格）解析逻辑。同步设置通过环境变量注入，授权码不返回接口、不写入日志。
+当前邮件同步使用标准库 IMAP（邮件接收协议）只读拉取 `INBOX`（收件箱），不删除或移动原邮件。同步按 Message-ID（邮件唯一标识）和附件 SHA-256（安全哈希）幂等；非 `.xls`/`.xlsx` 附件记录为忽略，单封邮件或单个附件失败不会中断后续邮件。附件接收统一调用正式导入服务，邮件接口不会复制 Excel（电子表格）解析逻辑。邮箱主机、端口、账号和协议仍由部署环境维护；网页只允许管理员更新受控文件中的授权码。
 
 ## 7. 配置、账号和审计接口
 
@@ -307,8 +315,13 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `GET /api/v1/audit-logs`（审计查询）。
 - `GET/PATCH /api/v1/system/settings`（系统设置，管理员）。
 - `GET /api/v1/system/health`（健康检查，不返回敏感配置）。
+- `GET /api/v1/system/operations`（任务进程、队列、磁盘和备份的非敏感运维摘要）。
+- `POST /api/v1/system/retention/preview`（管理员原始文件清理预演，永不删除）。
+- `POST /api/v1/system/retention/execute`（管理员执行清理，必须提供固定确认短语和操作原因）。
 
-系统设置只允许 `admin`（系统管理员）读取和修改，白名单为 `source_retention_days`（原始文件保留天数，1--3650）、`task_concurrency`（任务并发数，1--16）、`data_lateness_days`（数据迟到容忍天数，0--30）、`mail_sync_interval_minutes`（邮件同步间隔，1--1440）、`backup_retention_days`（备份保留天数，1--3650）和 `timezone`（时区）。返回值同时带 `source`（来源：database/environment/default）。当前数据库配置不热更新，worker（任务进程）和 retention（清理服务）在当前进程仍读取环境配置，响应 `meta.runtime_note`（运行时说明）会明确这一点。
+系统设置只允许 `admin`（系统管理员）读取和修改，白名单为 `source_retention_days`（原始文件保留天数，1--3650）、`task_concurrency`（任务并发数，1--16）、`data_lateness_days`（数据迟到容忍天数，0--30）、`mail_sync_interval_minutes`（邮件同步间隔，1--1440）、`mail_sync_enabled`（自动邮件同步开关）、`backup_retention_days`（备份保留天数，1--3650）和 `timezone`（时区）。自动邮件同步开关在每次定时任务前读取；其他数据库配置不热更新，响应 `meta.runtime_note`（运行时说明）会明确这一点。
+
+清理预演和执行均复用已有保留期限、备份检查、待复核保护、失败任务保护、审计锁和路径安全检查。执行请求必须包含 `confirmation: "DELETE_EXPIRED_SOURCE_FILES"` 和非空 `reason`（原因），否则返回 422；接口不能绕过任何安全判断。
 
 审计查询允许 `admin`（系统管理员）和 `operator`（业务员）只读访问，支持 `actor_user_id`、`action`、`resource_type`、`result`、`start`/`end` 和分页过滤；接口只返回安全摘要并递归剔除密码、令牌、授权码和数据库连接信息，不提供删除接口。
 
