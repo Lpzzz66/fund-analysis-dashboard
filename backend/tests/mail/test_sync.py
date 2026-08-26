@@ -284,3 +284,35 @@ def test_operator_can_sync_but_viewer_cannot_access_mail(
     assert viewer_resume.status_code == 403
     assert resumed.status_code == 200
     assert resumed.json()["data"]["auto_sync_enabled"] is True
+
+
+def test_safe_filename_rejects_windows_reserved_names() -> None:
+    from app.mail.service import MailService
+
+    service = MailService.__new__(MailService)
+    assert service._safe_filename("CON.xlsx") is False
+    assert service._safe_filename("NUL.xlsx") is False
+    assert service._safe_filename("com1.xlsx") is False
+    assert service._safe_filename("lpt9.XLSX") is False
+    # Trailing dots and spaces: Windows silently strips them, so two
+    # different filenames collide on disk.
+    assert service._safe_filename("report.xlsx.") is False
+    assert service._safe_filename("report.xlsx ") is False
+    # Normal filenames still pass.
+    assert service._safe_filename("估值表.xlsx") is True
+
+
+def test_decode_filename_rejects_misdeclared_charset() -> None:
+    """UTF-8 bytes declared as iso-8859-1 used to fall through to a latin-1
+    decode and save mojibake; now it must return "" so the caller falls back
+    to a token-based filename instead of persisting unreadable text."""
+
+    from app.mail.service import MailService
+
+    service = MailService.__new__(MailService)
+    # UTF-8 bytes for "你好" declared as iso-8859-1.
+    raw = "=?iso-8859-1?B?5L2g5aW9?="
+    assert service._decode_filename(raw) == ""
+    # When charset and bytes agree, decoding still works.
+    good = "=?utf-8?B?5L2g5aW9?="
+    assert service._decode_filename(good) == "你好"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
@@ -29,6 +30,14 @@ from .config import MailSettings
 
 VALUATION_EXTENSIONS = {".xls", ".xlsx"}
 MAX_MESSAGE_ID_LENGTH = 255
+# Windows reserved device names (case-insensitive). Filenames like CON.xlsx
+# or NUL.xlsx were accepted before, then the OS stripped the extension and
+# routed the file to the corresponding device on Windows hosts.
+WINDOWS_RESERVED_BASENAMES = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+})
 
 
 @dataclass(slots=True)
@@ -327,6 +336,8 @@ class MailService:
         counters: _SyncCounters,
     ) -> tuple[str, ImportBatch | None, int]:
         filename = self._decode_filename(filename_header)
+        if not filename:
+            filename = self._fallback_filename(part)
         payload = part.get_payload(decode=True)
         if not isinstance(payload, bytes):
             self._record_attachment_issue(
@@ -470,21 +481,63 @@ class MailService:
             decoded = decode_header(value)
         except (TypeError, ValueError):
             return ""
+        # Single-byte "passthrough" encodings accept every byte and produce
+        # mojibake when the bytes are actually UTF-8 or GBK. Detect that by
+        # re-decoding the bytes as UTF-8 — if it also yields a valid string,
+        # the declared charset is wrong. Fall back to the caller to mint a
+        # token-based filename.
+        passthrough_charsets = {
+            "iso-8859-1", "iso8859-1", "latin-1", "latin1",
+            "ascii", "us-ascii",
+        }
         for piece, charset in decoded:
             if isinstance(piece, bytes):
-                try:
-                    pieces.append(piece.decode(charset or "utf-8", errors="replace"))
-                except (LookupError, UnicodeError):
-                    pieces.append(piece.decode("latin-1", errors="replace"))
+                piece_text = None
+                if charset:
+                    try:
+                        piece_text = piece.decode(charset, errors="strict")
+                    except (LookupError, UnicodeError):
+                        piece_text = None
+                if piece_text is None:
+                    try:
+                        piece_text = piece.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError:
+                        return ""
+                elif (charset or "").lower() in passthrough_charsets:
+                    try:
+                        utf8_text = piece.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError:
+                        utf8_text = None
+                    if utf8_text is not None:
+                        return ""
+                pieces.append(piece_text)
             else:
                 pieces.append(piece)
         return "".join(pieces).strip()
+
+    @classmethod
+    def _fallback_filename(cls, part: Message) -> str:
+        """Return a safe deterministic filename when the declared one is unusable."""
+
+        extension = cls._extension(part.get_filename() or "")
+        if not extension or extension not in VALUATION_EXTENSIONS:
+            extension = ".xlsx"
+        return f"unnamed-{secrets.token_hex(8)}{extension}"
 
     @staticmethod
     def _safe_filename(filename: str) -> bool:
         if not filename or filename in {".", ".."}:
             return False
         if any(character in filename for character in ("\x00", "/", "\\")):
+            return False
+        # Trailing dots and spaces: Windows silently strips them, so
+        # "report.xlsx." and "report.xlsx " both collide with "report.xlsx".
+        if filename != filename.rstrip(". "):
+            return False
+        # Reject Windows reserved device names (case-insensitive). The OS
+        # silently strips the extension, so CON.xlsx -> CON, NUL.xlsx -> NUL.
+        bare = filename.rsplit(".", 1)[0].upper()
+        if bare in WINDOWS_RESERVED_BASENAMES:
             return False
         windows_path = PureWindowsPath(filename)
         return not windows_path.drive and windows_path.name == filename
