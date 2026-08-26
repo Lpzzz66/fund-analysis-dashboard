@@ -8,13 +8,13 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from tools.valuation_inventory.dedup import DedupGroup, DedupResult, GroupMember
+from tools.valuation_inventory.scanner import ScanResult
+
 from app.migration.inventory import build_inventory, classify_candidates
 from app.migration.manifest import MigrationManifest
 from app.migration.runner import run_migration
 from app.migration.transport import HttpImportTransport, HttpResponse, UploadReceipt
-
-from tools.valuation_inventory.dedup import DedupGroup, DedupResult, GroupMember
-from tools.valuation_inventory.scanner import ScanResult
 
 
 @dataclass(frozen=True)

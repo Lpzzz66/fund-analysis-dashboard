@@ -265,9 +265,7 @@ def check_position_market_value(
 
     calculated = quantity * market_price
     difference = calculated - market_value
-    effective_tolerance = max(
-        tolerance, abs(market_value) * relative_tolerance
-    )
+    effective_tolerance = max(tolerance, abs(market_value) * relative_tolerance)
     if abs(difference) > effective_tolerance:
         return ValidationFinding(
             rule_code=POSITION_MARKET_VALUE_RECONCILIATION,

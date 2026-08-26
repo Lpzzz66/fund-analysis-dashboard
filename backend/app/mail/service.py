@@ -33,11 +33,16 @@ MAX_MESSAGE_ID_LENGTH = 255
 # Windows reserved device names (case-insensitive). Filenames like CON.xlsx
 # or NUL.xlsx were accepted before, then the OS stripped the extension and
 # routed the file to the corresponding device on Windows hosts.
-WINDOWS_RESERVED_BASENAMES = frozenset({
-    "CON", "PRN", "AUX", "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-})
+WINDOWS_RESERVED_BASENAMES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+)
 
 
 @dataclass(slots=True)
@@ -487,8 +492,12 @@ class MailService:
         # the declared charset is wrong. Fall back to the caller to mint a
         # token-based filename.
         passthrough_charsets = {
-            "iso-8859-1", "iso8859-1", "latin-1", "latin1",
-            "ascii", "us-ascii",
+            "iso-8859-1",
+            "iso8859-1",
+            "latin-1",
+            "latin1",
+            "ascii",
+            "us-ascii",
         }
         for piece, charset in decoded:
             if isinstance(piece, bytes):

@@ -59,7 +59,10 @@ def _published_versions(
     rank = over(
         func.row_number(),
         partition_by=ValuationVersion.fund_id,
-        order_by=ValuationVersion.valuation_date.desc(),
+        order_by=(
+            ValuationVersion.valuation_date.desc(),
+            ValuationVersion.id.desc(),
+        ),
     )
     subquery = (
         select(ValuationVersion.id, rank.label("_rank"))

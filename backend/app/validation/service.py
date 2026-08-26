@@ -250,18 +250,18 @@ class ValidationService:
 def _prepend_missing_snapshot(report: ValidationReport) -> ValidationReport:
     from .rules import ValidationFinding
 
-    # Missing snapshot is informational, not blocking: it indicates that the
-    # version was persisted before its daily snapshot row was committed (e.g.
-    # on publish race). It should not pin the version to PENDING_REVIEW
-    # forever; reconciliation or a re-run will populate the snapshot.
+    # A missing product snapshot means the stored valuation is incomplete. Do
+    # not allow it to be published until the snapshot is restored and the
+    # version is validated again; otherwise analytics' inner join would
+    # silently omit this valuation from the published data set.
     finding = ValidationFinding(
         rule_code="valuation_snapshot_missing",
-        level=ValidationLevel.INFO,
+        level=ValidationLevel.CRITICAL,
         source_location="fund_daily_snapshot",
-        message="估值版本缺少产品日快照，待补齐后再校验汇总",
+        message="估值版本缺少产品日快照，补齐后才能发布",
     )
     findings = (finding, *report.findings)
-    return ValidationReport(findings=findings, status=ValuationStatus.PUBLISHABLE)
+    return ValidationReport(findings=findings, status=ValuationStatus.PENDING_REVIEW)
 
 
 __all__ = [

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.db.base import ValidationLevel, ValuationStatus
 from app.parser.interface import ParsedPosition, ParsedShareClass, ParsedValuation
 from app.validation.rules import (
@@ -14,7 +16,6 @@ from app.validation.rules import (
     validate_parsed_valuation,
     validate_values,
 )
-from sqlalchemy.orm import Session
 
 
 def test_asset_liability_balance_reports_info_and_critical() -> None:
@@ -117,8 +118,8 @@ def test_position_relative_tolerance_still_catches_real_drift() -> None:
         quantity=Decimal(100),
         unit_cost=None,
         cost=None,
-        market_price=Decimal("100"),
-        market_value=Decimal("10100"),
+        market_price=Decimal(100),
+        market_value=Decimal(10100),
         nav_weight=None,
         valuation_gain=None,
         suspension_info=None,
@@ -294,12 +295,13 @@ def test_validation_service_accepts_parser_import_state(session: Session) -> Non
 
     report = ValidationService(session).validate_version(version.id)
 
-    # Missing snapshot is informational — version should remain publishable so
-    # reconciliation can later populate the snapshot without operator action.
-    assert report.status == ValuationStatus.PUBLISHABLE
-    assert any(
-        f.rule_code == "valuation_snapshot_missing" for f in report.findings
+    # Missing snapshot is blocking: publishing it would make analytics omit
+    # the valuation through its inner join.
+    assert report.status == ValuationStatus.PENDING_REVIEW
+    finding = next(
+        f for f in report.findings if f.rule_code == "valuation_snapshot_missing"
     )
+    assert finding.level == ValidationLevel.CRITICAL
 
 
 def test_postgresql_validation_load_locks_version_row() -> None:

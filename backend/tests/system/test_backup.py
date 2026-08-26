@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.db.base import AuditResult
 from app.db.models import AuditLog
 from app.system.backup import (
@@ -15,8 +18,6 @@ from app.system.backup import (
     UnconfiguredRemoteSourceBackup,
     UnsafeBackupPathError,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 def _sqlite_url(path: Path) -> str:

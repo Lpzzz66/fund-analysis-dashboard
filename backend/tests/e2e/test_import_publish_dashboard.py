@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import date
 from io import BytesIO
 
-from app.db.base import ValuationStatus
-from app.db.models import Fund, ValuationVersion
-from app.imports.tasks import process_next_job
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
+
+from app.db.base import ValuationStatus
+from app.db.models import Fund, ValuationVersion
+from app.imports.tasks import process_next_job
 
 
 def _valuation_xlsx() -> bytes:
