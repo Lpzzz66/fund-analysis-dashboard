@@ -45,6 +45,7 @@ def test_retryable_failure_uses_limited_backoff(
 
         claimed = claim_next_job(session, now=now)
         fail_job(session, claimed, "temporary_io", retryable=True, now=now)
+        session.commit()
         assert claimed.status == JobStatus.RETRY_DUE
         assert claimed.next_retry_at is not None
         assert claim_next_job(session, now=now) is None
@@ -58,6 +59,22 @@ def test_retryable_failure_uses_limited_backoff(
             now=claimed.next_retry_at,
         )
         assert retry.status == JobStatus.FAILED
+
+
+def test_claim_never_commits_unrelated_background_job_changes(
+    app_and_engine: tuple[object, object],
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        session.add(
+            BackgroundJob(job_type="process_import_batch", resource_id="1")
+        )
+        session.commit()
+        session.get(BackgroundJob, 1).error_code = "local-only"
+        with pytest.raises(RuntimeError, match="job_claim_requires_clean_session"):
+            claim_next_job(session)
+        session.rollback()
+        assert session.get(BackgroundJob, 1).error_code is None
 
 
 def test_claim_is_persisted_before_worker_can_rollback(

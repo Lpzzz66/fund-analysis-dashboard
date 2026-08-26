@@ -35,21 +35,13 @@ def claim_next_job(
     snapshot; worker writes still commit through the caller after lease checks.
     """
 
-    dirty_jobs = tuple(
-        item for item in session.dirty if isinstance(item, BackgroundJob)
-    )
-    if session.new or session.deleted or len(dirty_jobs) != len(session.dirty):
+    if session.new or session.dirty or session.deleted:
         raise RuntimeError("job_claim_requires_clean_session")
 
     current_time = now or datetime.now(UTC)
     expired_before = current_time - JOB_LEASE_DURATION
     bind = session.get_bind(mapper=BackgroundJob)
-    claim_session = (
-        session
-        if dirty_jobs or session.info.get("job_transition_pending")
-        else Session(bind=bind, expire_on_commit=False)
-    )
-    owns_claim_session = claim_session is not session
+    claim_session = Session(bind=bind, expire_on_commit=False)
     try:
         statement = (
             select(BackgroundJob)
@@ -90,7 +82,6 @@ def claim_next_job(
                 batch.status = ImportBatchStatus.FAILED
                 batch.ended_at = current_time
             claim_session.commit()
-            session.info.pop("job_transition_pending", None)
             return None
 
         job.status = JobStatus.RUNNING
@@ -102,14 +93,11 @@ def claim_next_job(
         job.error_code = None
         job.next_retry_at = None
         claim_session.commit()
-        session.info.pop("job_transition_pending", None)
-        if owns_claim_session:
-            claim_session.expunge(job)
+        claim_session.expunge(job)
     finally:
-        if owns_claim_session:
-            claim_session.close()
+        claim_session.close()
 
-    return job if not owns_claim_session else session.merge(job, load=False)
+    return session.merge(job, load=False)
 
 
 def finish_job(
