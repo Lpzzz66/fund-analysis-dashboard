@@ -141,6 +141,9 @@ def test_position_metadata_comes_only_from_explicit_ancestor_names(
     assert explicit.market == "上交所"
     assert explicit.account == "信用账户"
     assert explicit.source_row == 8
+    # Long numeric codes must not be truncated to 6 digits, otherwise distinct
+    # securities collide on the PositionDaily security_code key.
+    assert explicit.security_code == "11020101600001"
 
     leaf_name_only = positions["11030101600002"]
     assert leaf_name_only.market is None

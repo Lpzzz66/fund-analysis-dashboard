@@ -27,10 +27,33 @@ def decimal(value: Any) -> Decimal | None:
         except (InvalidOperation, ValueError):
             return None
         return parsed if parsed.is_finite() else None
-    raw = text(value).replace(",", "").replace("，", "")
-    if not raw or raw in {"-", "--", "N/A", "NA", "无"}:
+    cleaned = text(value)
+    if not cleaned or cleaned in {"-", "--", "N/A", "NA", "无"}:
         return None
+    # When both '.' and ',' are present, the last separator is the decimal
+    # mark (US "1,234.56" vs EU "1.234,56"). Anything else is ambiguous and
+    # rejected rather than silently parsed 1000x off.
+    has_dot = "." in cleaned
+    has_comma = "," in cleaned
+    has_cn_comma = "，" in cleaned
+    if has_dot and has_comma:
+        last_sep = max(cleaned.rfind("."), cleaned.rfind(","))
+        if cleaned[last_sep] == ".":
+            # US: commas are thousands separators, remove them.
+            raw = cleaned.replace(",", "")
+        else:
+            # EU: dots are thousands separators, swap them out, then turn the
+            # decimal comma into a dot.
+            raw = cleaned.replace(".", "").replace(",", ".")
+    elif has_comma:
+        raw = cleaned.replace(",", "")
+    else:
+        raw = cleaned
+    if has_cn_comma:
+        raw = raw.replace("，", "")
     raw = raw.removesuffix("%")
+    if not raw:
+        return None
     try:
         parsed = Decimal(raw)
     except (InvalidOperation, ValueError):

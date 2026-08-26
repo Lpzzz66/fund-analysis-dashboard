@@ -328,8 +328,12 @@ class ValuationParser:
         subject: ParsedSubject,
         subjects_by_code: Mapping[str, ParsedSubject],
     ) -> ParsedPosition:
+        # Only collapse to a 6-digit A-share code when the full code is exactly
+        # 6 digits. Truncating longer numeric codes (e.g. broker-internal 10-digit
+        # codes) caused distinct securities to collide on the same PositionDaily key.
         security_code = (
-            subject.code[-6:] if subject.code[-6:].isdigit() else subject.code
+            subject.code if len(subject.code) == 6 and subject.code.isdigit()
+            else subject.code
         )
         market, account = cls._position_metadata(subject, subjects_by_code)
         return ParsedPosition(

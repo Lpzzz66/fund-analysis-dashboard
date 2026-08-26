@@ -41,3 +41,14 @@ def test_validation_receives_missing_value_instead_of_non_finite_decimal() -> No
     )
 
     assert report.critical_count >= 1
+
+
+def test_decimal_disambiguates_us_vs_eu_locale() -> None:
+    # US: comma is thousands separator, period is decimal — last sep is '.'.
+    assert decimal("10,824,713.18") == Decimal("10824713.18")
+    assert decimal("1,234.56") == Decimal("1234.56")
+    # EU: period is thousands separator, comma is decimal — last sep is ','.
+    assert decimal("1.234,56") == Decimal("1234.56")
+    assert decimal("10.824.713,18") == Decimal("10824713.18")
+    # Chinese full-width comma is treated as ASCII comma.
+    assert decimal("1，234.56") == Decimal("1234.56")
