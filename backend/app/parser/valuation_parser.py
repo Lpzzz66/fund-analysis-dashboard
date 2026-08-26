@@ -246,7 +246,10 @@ class ValuationParser:
             )
             if field in {"unit_nav", "cumulative_unit_nav", "previous_unit_nav"}:
                 parsed = decimal(raw_value)
-            values.setdefault(field, parsed)
+            # Last occurrence wins on a duplicated summary label — newer rows
+            # in a workbook generally reflect the most recently refreshed
+            # value. Every occurrence is still recorded in `_provenance`.
+            values[field] = parsed
             values["_provenance"].append(
                 Provenance(
                     standard_field=field,

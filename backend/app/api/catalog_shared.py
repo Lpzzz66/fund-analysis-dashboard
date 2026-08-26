@@ -57,8 +57,18 @@ def _validate_mapping_fields(
     valid_from: date | None,
     valid_to: date | None,
 ) -> None:
-    if not code_or_prefix and not raw_name_pattern:
+    has_code = bool(code_or_prefix and code_or_prefix.strip())
+    has_pattern = bool(raw_name_pattern and raw_name_pattern.strip())
+    if not has_code and not has_pattern:
         raise ValueError("subject_code_or_prefix or raw_name_pattern is required")
+    # Each side of the OR must independently carry content. A row with
+    # code_or_prefix="" but raw_name_pattern="foo" would otherwise be saved
+    # by the API and silently dropped by the matcher's truthiness guard,
+    # producing dead rules.
+    if code_or_prefix is not None and not has_code:
+        raise ValueError("subject_code_or_prefix must not be blank")
+    if raw_name_pattern is not None and not has_pattern:
+        raise ValueError("raw_name_pattern must not be blank")
     _validate_date_range(valid_from, valid_to, "mapping")
 
 
