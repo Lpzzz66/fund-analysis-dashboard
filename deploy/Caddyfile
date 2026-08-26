@@ -1,0 +1,26 @@
+{
+	email {$ACME_EMAIL}
+	auto_https on
+}
+
+{$DASHBOARD_DOMAIN} {
+	encode gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	# The first release exposes only the implemented API and liveness endpoint.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle /health/* {
+		reverse_proxy api:8000
+	}
+
+	# The frontend is not deployed yet. Replace this handler with a frontend
+	# reverse_proxy after the web application has a real service boundary.
+	respond "frontend is not deployed" 404
+}
