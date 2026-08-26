@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from app.migration.inventory import build_inventory, classify_candidates
 from app.migration.manifest import MigrationManifest
 from app.migration.runner import run_migration
@@ -87,7 +86,9 @@ def test_classification_keeps_primary_skips_same_hash_and_reviews_conflict() -> 
         "gz/梦一号估值表/2026/copy.xls", source_zone="gz", sha256="a" * 64
     )
     conflict_primary = FakeFile(
-        "梦一号估值表/2026/conflict.xls", sha256="b" * 64, valuation_date=date(2026, 1, 6)
+        "梦一号估值表/2026/conflict.xls",
+        sha256="b" * 64,
+        valuation_date=date(2026, 1, 6),
     )
     conflict_gz = FakeFile(
         "gz/梦一号估值表/2026/conflict.xls",
@@ -161,7 +162,9 @@ class FakeTransport:
         if original_filename in self.fail_once:
             self.fail_once.remove(original_filename)
             raise RuntimeError("temporary failure for F:\\AgentWorks\\估值表A")
-        return UploadReceipt(remote_source_file_id=len(self.upload_calls), duplicate=False)
+        return UploadReceipt(
+            remote_source_file_id=len(self.upload_calls), duplicate=False
+        )
 
     def complete_batch(self, batch_id: int) -> None:
         self.complete_calls.append(batch_id)
@@ -188,7 +191,10 @@ def test_resume_retries_failed_file_without_touching_source_and_redacts_report(
         valuation_date=date(2026, 1, 6),
     )
     snapshot_before = {
-        path.relative_to(root).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns)
+        path.relative_to(root).as_posix(): (
+            path.stat().st_size,
+            path.stat().st_mtime_ns,
+        )
         for path in root.rglob("*")
         if path.is_file()
     }
@@ -231,7 +237,10 @@ def test_resume_retries_failed_file_without_touching_source_and_redacts_report(
     assert transport.complete_calls == [41]
 
     snapshot_after = {
-        path.relative_to(root).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns)
+        path.relative_to(root).as_posix(): (
+            path.stat().st_size,
+            path.stat().st_mtime_ns,
+        )
         for path in root.rglob("*")
         if path.is_file()
     }
@@ -275,9 +284,12 @@ def test_dry_run_writes_manifest_and_never_calls_transport(tmp_path: Path) -> No
 
     assert result.manifest.batch_id is None
     assert result.manifest.entry("dry-run.xls").status == "pending"
-    assert json.loads((out / "report.json").read_text(encoding="utf-8"))["summary"][
-        "pending_count"
-    ] == 1
+    assert (
+        json.loads((out / "report.json").read_text(encoding="utf-8"))["summary"][
+            "pending_count"
+        ]
+        == 1
+    )
 
 
 def test_gz_only_candidate_is_uploaded_and_completes_batch(tmp_path: Path) -> None:
@@ -336,8 +348,11 @@ def test_http_transport_is_injectable_and_sends_only_basename() -> None:
 
     assert receipt == UploadReceipt(remote_source_file_id=10, duplicate=False)
     assert len(requests) == 3
-    assert all("F:\\AgentWorks" not in body.decode("utf-8", errors="ignore") for *_, body in requests)
-    assert "filename=\"估值表.xls\"" in requests[1][3].decode("utf-8")
+    assert all(
+        "F:\\AgentWorks" not in body.decode("utf-8", errors="ignore")
+        for *_, body in requests
+    )
+    assert 'filename="估值表.xls"' in requests[1][3].decode("utf-8")
     assert requests[1][2]["Authorization"] == "Bearer test-token"
 
 

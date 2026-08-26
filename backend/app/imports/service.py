@@ -24,9 +24,11 @@ from .storage import (
     FileTooLargeError,
     InvalidFileError,
     discard_staged_upload,
+    forget_stored_object,
     remove_stored_object,
     stage_upload,
     store_staged_upload,
+    track_stored_object,
 )
 
 
@@ -130,6 +132,7 @@ class ImportService:
             return UploadResult(source_file=existing_file, duplicate=True)
 
         object_name, stored_path = store_staged_upload(staged, self.storage_dir)
+        track_stored_object(self.session, object_name, self.storage_dir)
         source_file = SourceFile(
             original_filename=staged.original_filename,
             file_hash=staged.file_hash,
@@ -148,8 +151,10 @@ class ImportService:
             )
             if existing_file is None:
                 remove_stored_object(stored_path, self.storage_dir)
+                forget_stored_object(self.session, object_name, self.storage_dir)
                 raise
             remove_stored_object(stored_path, self.storage_dir)
+            forget_stored_object(self.session, object_name, self.storage_dir)
             self._link_file(batch, existing_file, duplicate=True)
             self._record_audit(
                 action="import.duplicate_file",
@@ -161,6 +166,7 @@ class ImportService:
             return UploadResult(source_file=existing_file, duplicate=True)
         except Exception:
             remove_stored_object(stored_path, self.storage_dir)
+            forget_stored_object(self.session, object_name, self.storage_dir)
             raise
         self._link_file(batch, source_file, duplicate=False)
         self._record_audit(

@@ -4,8 +4,6 @@ import hashlib
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
 from app.config import get_settings
 from app.db.base import AuditResult, ImportBatchStatus, JobStatus, ValuationStatus
 from app.db.models import (
@@ -18,6 +16,7 @@ from app.db.models import (
     ValuationVersion,
 )
 from app.system.retention import RetentionService
+from sqlalchemy.orm import Session
 
 
 def _source(

@@ -136,9 +136,7 @@ def classify_candidates(
                     info = by_rel[rel_path]
                     zone = _enum_value(getattr(info, "zone", "other"))
                     action = (
-                        ACTION_IMPORT
-                        if zone == "primary"
-                        else ACTION_IMPORT_GZ_ONLY
+                        ACTION_IMPORT if zone == "primary" else ACTION_IMPORT_GZ_ONLY
                     )
                     candidates[rel_path] = _candidate(
                         info,

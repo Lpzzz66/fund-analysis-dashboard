@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from typing import cast
 
 from .runner import run_migration
 from .transport import HttpImportTransport
@@ -60,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误：{exc}")
         return 2
 
-    summary = result.report["summary"]
+    summary = cast(dict[str, object], result.report["summary"])
     print(
         "迁移完成：扫描 {scanned} 个文件，候选 {candidate} 个，上传 {uploaded} 个，"
         "失败 {failed} 个，需复核 {review} 个，批次状态 {batch}".format(

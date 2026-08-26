@@ -236,7 +236,9 @@ def reconcile_manifest(
 def fingerprint(root_name: str, entries: list[ManifestEntry]) -> str:
     payload = {
         "root_name": root_name,
-        "entries": [entry.static_dict() for entry in sorted(entries, key=lambda e: e.rel_path)],
+        "entries": [
+            entry.static_dict() for entry in sorted(entries, key=lambda e: e.rel_path)
+        ],
     }
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")

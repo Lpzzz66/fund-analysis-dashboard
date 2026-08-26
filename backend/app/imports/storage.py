@@ -11,12 +11,16 @@ from pathlib import Path
 from typing import BinaryIO
 from zipfile import BadZipFile, ZipFile
 
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
 ALLOWED_EXTENSIONS = {".xls", ".xlsx"}
 OLE_HEADER = bytes.fromhex("D0CF11E0A1B11AE1")
 ZIP_HEADER = b"PK\x03\x04"
 XLSX_REQUIRED_MEMBERS = {"[Content_Types].xml", "xl/workbook.xml"}
 MAX_XLSX_MEMBERS = 1_024
 MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+PENDING_SOURCE_OBJECTS_KEY = "pending_source_objects"
 
 
 class UnsafeStoragePathError(ValueError):
@@ -106,6 +110,47 @@ def store_staged_upload(staged: StagedUpload, storage_root: Path) -> tuple[str, 
             staged.path.replace(destination)
             return object_name, destination
     raise RuntimeError("Could not allocate a unique source-file object name")
+
+
+def track_stored_object(session: Session, object_name: str, storage_root: Path) -> None:
+    """Track a moved object until the surrounding database transaction settles."""
+
+    pending = session.info.setdefault(PENDING_SOURCE_OBJECTS_KEY, set())
+    if not isinstance(pending, set):
+        raise TypeError("invalid_pending_source_objects")
+    pending.add((str(storage_root.resolve()), object_name))
+
+
+def forget_stored_object(
+    session: Session, object_name: str, storage_root: Path
+) -> None:
+    pending = session.info.get(PENDING_SOURCE_OBJECTS_KEY)
+    if isinstance(pending, set):
+        pending.discard((str(storage_root.resolve()), object_name))
+
+
+@event.listens_for(Session, "after_commit")
+def _clear_source_objects_after_root_commit(session: Session) -> None:
+    if session.get_nested_transaction() is None:
+        session.info.pop(PENDING_SOURCE_OBJECTS_KEY, None)
+
+
+@event.listens_for(Session, "after_rollback")
+def _remove_source_objects_after_root_rollback(session: Session) -> None:
+    if session.get_nested_transaction() is not None:
+        return
+    pending = session.info.pop(PENDING_SOURCE_OBJECTS_KEY, set())
+    if not isinstance(pending, set):
+        return
+    for root_text, object_name in pending:
+        try:
+            path = resolve_in_root(Path(root_text), object_name)
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
+        except (OSError, UnsafeStoragePathError):
+            # Cleanup is best effort; the retention/reconciliation task reports
+            # any object that remains without a database row.
+            continue
 
 
 def discard_staged_upload(staged: StagedUpload, temp_root: Path) -> None:

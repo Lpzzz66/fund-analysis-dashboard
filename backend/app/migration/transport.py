@@ -7,7 +7,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -71,7 +71,8 @@ class HttpImportTransport:
             operation="create_batch",
         )
         try:
-            return payload["data"]["id"]
+            data = cast(dict[str, object], payload["data"])
+            return cast(int | str, data["id"])
         except (KeyError, TypeError) as exc:
             raise HttpTransportError("create_batch_invalid_response") from exc
 
@@ -96,9 +97,9 @@ class HttpImportTransport:
             content_type=f"multipart/form-data; boundary={boundary}",
         )
         try:
-            data = payload["data"]
+            data = cast(dict[str, object], payload["data"])
             return UploadReceipt(
-                remote_source_file_id=data.get("id"),
+                remote_source_file_id=cast(int | str | None, data.get("id")),
                 duplicate=bool(data.get("duplicate", False)),
             )
         except (KeyError, TypeError, AttributeError) as exc:
@@ -159,7 +160,12 @@ class HttpImportTransport:
 
 
 def _basename(filename: str) -> str:
-    if not filename or Path(filename).name != filename or "/" in filename or "\\" in filename:
+    if (
+        not filename
+        or Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
+    ):
         raise ValueError("upload filename must be a basename")
     return filename
 

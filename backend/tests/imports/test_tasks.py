@@ -66,9 +66,7 @@ def test_claim_never_commits_unrelated_background_job_changes(
 ) -> None:
     _, engine = app_and_engine
     with Session(engine) as session:
-        session.add(
-            BackgroundJob(job_type="process_import_batch", resource_id="1")
-        )
+        session.add(BackgroundJob(job_type="process_import_batch", resource_id="1"))
         session.commit()
         session.get(BackgroundJob, 1).error_code = "local-only"
         with pytest.raises(RuntimeError, match="job_claim_requires_clean_session"):

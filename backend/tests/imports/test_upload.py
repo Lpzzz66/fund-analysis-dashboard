@@ -73,6 +73,27 @@ def test_duplicate_hash_is_idempotent_and_temp_file_is_cleaned(
         assert {"import.upload", "import.duplicate_file"}.issubset(actions)
 
 
+def test_rolled_back_upload_removes_formal_storage_object(
+    app_and_engine: tuple[object, object],
+) -> None:
+    app, engine = app_and_engine
+    content = make_xlsx_bytes()
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+        result = service.receive_upload(
+            batch.id, "rolled-back.xlsx", BytesIO(content), actor.id
+        )
+        stored_path = (
+            Path(app.state.settings.source_storage_dir) / result.source_file.object_name
+        )
+        assert stored_path.exists()
+        session.rollback()
+        assert not stored_path.exists()
+        assert list(Path(app.state.settings.source_storage_dir).glob("*")) == []
+
+
 def test_valid_xls_ole_header_is_accepted(
     app_and_engine: tuple[object, object],
 ) -> None:

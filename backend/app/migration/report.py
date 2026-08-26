@@ -69,7 +69,15 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append(f"| {key} | {value} |")
     if report.get("last_error"):
         lines.extend(("", f"- 最近批次错误：{report['last_error']}"))
-    lines.extend(("", "## 文件明细", "", "| 动作 | 状态 | 产品 | 估值日期 | 相对路径 | 错误 |", "| --- | --- | --- | --- | --- | --- |"))
+    lines.extend(
+        (
+            "",
+            "## 文件明细",
+            "",
+            "| 动作 | 状态 | 产品 | 估值日期 | 相对路径 | 错误 |",
+            "| --- | --- | --- | --- | --- | --- |",
+        )
+    )
     for entry in report["entries"]:
         values = [
             entry["action"],
