@@ -10,7 +10,7 @@
 
 ---
 
-状态：待用户确认第 1 节决策后执行。
+状态：2026-08-26 用户已批准执行；决策 A、B、C、E 采用推荐方案，决策 D 按用户要求增加邮箱授权码维护、自动同步暂停/恢复和手工清理。
 
 ## 1. 开工前决策
 
@@ -45,9 +45,9 @@
 
 ### 决策 D：未闭环运营按钮
 
-推荐本轮隐藏而不是补做：重新解析、重新校验、已知例外、科目映射试跑、风险规则试算、网页版目录导入、邮件授权码保存、邮件暂停/恢复和手工执行清理。
+本轮隐藏而不是补做：重新解析、重新校验、已知例外、科目映射试跑、风险规则试算和网页版目录导入。
 
-保留并接真实接口：上传、开始处理、重试单个失败批次、复核、发布、驳回、撤回、恢复、下载原文件、邮件测试连接、立即同步、风险事件处理和系统运维只读状态。
+保留并接真实接口：上传、开始处理、重试单个失败批次、复核、发布、驳回、撤回、恢复、下载原文件、邮件授权码保存、邮件测试连接、立即同步、自动同步暂停/恢复、风险事件处理、系统运维状态、原始文件清理预演和管理员手工执行清理。
 
 ### 决策 E：历史数据权威范围
 
@@ -216,6 +216,50 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: preserve position account market and source`
 
+### Task 5：补齐邮箱凭据、同步开关和手工清理控制
+
+**Files:**
+
+- Create: `backend/app/mail/credential_store.py`
+- Modify: `backend/app/mail/config.py`
+- Modify: `backend/app/api/mail.py`
+- Modify: `backend/app/system/settings.py`
+- Modify: `backend/app/system/maintenance.py`
+- Modify: `backend/app/api/system.py`
+- Modify: `backend/tests/mail/test_sync.py`
+- Modify: `backend/tests/api/test_risk_system.py`
+- Modify: `backend/tests/test_maintenance.py`
+- Modify: `deploy/compose.prod.yml`
+- Modify: `deploy/.env.example`
+- Modify: `docs/runbook.md`
+- Modify: `docs/05-API-接口草案.md`
+
+**接口与权限：**
+
+- `PUT /api/v1/mail/credential`：仅管理员；请求只包含 `authorization_code`，长度 1--256。响应只返回是否已配置、凭据来源和是否可由网页更新，绝不回显授权码。
+- `POST /api/v1/mail/pause` 与 `POST /api/v1/mail/resume`：仅管理员；只控制定时自动同步。管理员和业务员仍可调用“立即同步”。重复暂停或恢复保持幂等。
+- `POST /api/v1/system/retention/preview`：仅管理员；始终调用现有清理服务的预演模式，不删除文件。
+- `POST /api/v1/system/retention/execute`：仅管理员；请求必须包含 `confirmation: "DELETE_EXPIRED_SOURCE_FILES"` 和非空 `reason`，否则返回 422。
+
+**安全和运行边界：**
+
+- 授权码写入 `MAIL_IMAP_PASSWORD_FILE` 指向的服务器受控文件，不进入数据库、日志、审计摘要、异常文本或接口响应。
+- 使用同目录临时文件、权限 `0600` 和原子替换；目标目录不存在、不可写或环境变量 `MAIL_IMAP_PASSWORD` 已直接提供凭据时拒绝网页覆盖并返回稳定错误。
+- 生产部署把受控秘密目录以可写方式只挂载给 API（接口服务），以只读方式挂载给 worker（任务进程）；不增加独立密钥服务或数据库迁移。
+- 自动同步开关保存在现有 `SystemState.settings`，默认开启；每次定时同步执行前读取，暂停时返回可审计的跳过结果，不建立第二套调度器。
+- 手工清理复用现有保留期限、备份、待复核、失败任务、审计锁和路径安全检查；接口不能绕过任何保护。执行结果和操作原因写审计，但不返回服务器绝对路径。
+
+**测试：**
+
+1. 授权码写入受控文件且权限正确，响应、审计和错误均不泄露明文。
+2. 环境变量凭据优先时拒绝网页覆盖；未配置可写秘密文件时安全失败。
+3. 管理员可暂停/恢复，业务员和普通看板不能修改；暂停不阻止手工立即同步。
+4. 定时维护在暂停时不连接邮箱，恢复后正常执行。
+5. 清理预演不删除；正式执行缺少确认短语或原因时拒绝。
+6. 正式执行仍跳过未备份、待复核、失败任务和审计锁定文件，并记录操作者和原因。
+
+**Commit:** `feat: add controlled mail and retention operations`
+
 ### 批次一统一审计
 
 - 对 2,787 张历史估值表重新解析，必须仍为 2,787 成功、0 失败。
@@ -225,7 +269,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 ## 4. 批次二：补齐有限的展示接口
 
-### Task 5：拆分过大的基金查询路由
+### Task 6：拆分过大的基金查询路由
 
 **Files:**
 
@@ -245,7 +289,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `refactor: separate fund analysis routes`
 
-### Task 6：公司序列和产品概览接口
+### Task 7：公司序列和产品概览接口
 
 **Files:**
 
@@ -272,7 +316,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: expose company series and fund overview`
 
-### Task 7：扩展净值、资产配置、持仓和份额查询
+### Task 8：扩展净值、资产配置、持仓和份额查询
 
 **Files:**
 
@@ -291,7 +335,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: complete published fund analysis queries`
 
-### Task 8：版本、差异和来源接口
+### Task 9：版本、差异和来源接口
 
 **Files:**
 
@@ -325,7 +369,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: expose valuation history diff and sources`
 
-### Task 9：收紧列表参数与接口文档
+### Task 10：收紧列表参数与接口文档
 
 **Files:**
 
@@ -356,7 +400,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 ## 5. 批次三：前端去模拟化和页面收敛
 
-### Task 10：建立唯一正式 HTTP 适配器
+### Task 11：建立唯一正式 HTTP 适配器
 
 **Files:**
 
@@ -385,7 +429,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: connect frontend to authenticated backend`
 
-### Task 11：收敛总览、产品列表和产品详情
+### Task 12：收敛总览、产品列表和产品详情
 
 **Files:**
 
@@ -416,7 +460,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `feat: render trusted dashboard and fund analysis data`
 
-### Task 12：接入导入、复核、邮件和风险页面
+### Task 13：接入导入、复核、邮件和风险页面
 
 **Files:**
 
@@ -432,12 +476,12 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 - 只显示单批次可重试按钮；不提供“重试全部”。
 - 复核接真实列表、详情、确认发布、驳回、撤回和恢复。
 - 隐藏重新解析、重新校验、已知例外和规则试算。
-- 邮件页面改为只读配置状态、测试连接、立即同步和同步记录，不收集授权码。
+- 邮件页面提供管理员授权码输入和保存、自动同步暂停/恢复、测试连接、立即同步和同步记录；授权码提交后立即清空输入，页面永不读取或展示已保存明文。
 - 风险规则类型从后端支持集合生成；事件处理写真实意见和证据引用。
 
 **Commit:** `feat: connect import review mail and risk workflows`
 
-### Task 13：接入主数据和系统管理页面
+### Task 14：接入主数据和系统管理页面
 
 **Files:**
 
@@ -455,13 +499,13 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 - 产品、别名、份额类别、科目映射、账号、审计和设置全部接真实接口。
 - 删除页面中的硬编码变更记录、命中样本和登录记录；没有接口时不展示入口。
 - 审计时间和操作人筛选必须真正传参。
-- 数据保留页面改为只读“系统运行状态”，复用 `/system/operations` 展示 worker、队列、磁盘和备份；不提供手工清理按钮。
+- 数据保留页面复用 `/system/operations` 展示 worker、队列、磁盘和备份，并提供清理预演与管理员手工执行；执行前显示预演结果，要求二次确认、输入确认短语和操作原因。
 - 路由增加角色守卫；无权限页面显示 403 状态，不仅隐藏导航。
 - 普通看板所有写按钮不可见，后端权限测试继续作为最终安全边界。
 
 **Commit:** `feat: connect catalog and system administration pages`
 
-### Task 14：隔离模拟数据
+### Task 15：隔离模拟数据
 
 **Files:**
 
@@ -488,7 +532,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 ## 6. 批次四：端到端验收和历史迁移预演
 
-### Task 15：扩展端到端测试
+### Task 16：扩展端到端测试
 
 **Files:**
 
@@ -509,7 +553,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `test: cover converged valuation workflow`
 
-### Task 16：2,787 张解析回归和迁移预检
+### Task 17：2,787 张解析回归和迁移预检
 
 **Inputs:**
 
@@ -536,7 +580,7 @@ Expected: 目标测试通过，既有解析和校验行为不回归。
 
 **Commit:** `docs: record parser and migration acceptance`
 
-### Task 17：全量质量门禁和文档收口
+### Task 18：全量质量门禁和文档收口
 
 **Files:**
 
@@ -588,12 +632,12 @@ npm run build
 
 | 批次 | 预计人日 | 可并行工作 |
 |---|---:|---|
-| 范围与解析 | 2--4 | 文档冻结与解析测试可并行，解析接口由主代理统一审计 |
+| 范围、解析与运维控制 | 3--5 | 文档冻结、解析测试与运维控制可并行，公共接口由主代理统一审计 |
 | 查询接口 | 4--6 | 公司接口、产品接口、版本来源接口可由不同代理处理 |
 | 前端收敛 | 6--9 | 数据适配完成后，分析页和运营管理页可分组并行 |
 | 验收迁移 | 2--4 | 前端视觉验收与后端历史预检可并行 |
 
-总量约 14--23 人日。使用 2--3 个子代理处理互不重叠的文件组，预计 6--10 个工作日完成；每个批次统一审计一次，不为每个小任务重复完整审计。
+总量约 15--25 人日。使用 2--3 个子代理处理互不重叠的文件组，预计 6--11 个工作日完成；每个批次统一审计一次，不为每个小任务重复完整审计。
 
 ## 8. 完成标准
 
