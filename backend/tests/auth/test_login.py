@@ -3,13 +3,14 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from app.auth.service import AuthService
-from app.db.base import UserStatus
-from app.db.models import AuditLog, User, UserSession
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.auth.service import AuthService
+from app.db.base import UserStatus
+from app.db.models import AuditLog, User, UserSession
 
 
 class _RecordingPasswordHasher:

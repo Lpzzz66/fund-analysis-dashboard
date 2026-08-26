@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.db.base import JobStatus
 from app.db.models import BackgroundJob, ImportBatch
 from app.imports.tasks import (
@@ -9,7 +11,6 @@ from app.imports.tasks import (
     finish_job,
     process_next_job,
 )
-from sqlalchemy.orm import Session
 
 
 def test_claim_job_and_finish(app_and_engine: tuple[object, object]) -> None:

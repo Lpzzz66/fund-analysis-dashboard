@@ -2,6 +2,12 @@
 
 接口统一前缀：`/api/v1`（第一版接口路径）。接口只返回已发布数据给看板；导入和复核接口可以返回待处理数据，但必须明确状态。
 
+本文件按以下状态冻结，前端不得把三类内容混为已经可调用的接口：
+
+- **当前已实现**：后端路由、权限和测试均已存在，可以直接接入。
+- **本轮前端必须接入**：后端已经实现，但冻结的模拟原型尚未调用；正式前端入口必须改用真实接口。
+- **明确延期**：当前没有闭环路由或任务语义，首期页面隐藏，不发送占位请求。
+
 ## 1. 通用响应结构
 
 成功响应建议：
@@ -21,7 +27,7 @@
 }
 ```
 
-列表响应增加 `page`、`page_size`、`total`。
+只有明确实现分页的列表响应才包含 `page`、`page_size`、`total`；不能据此推定所有列表都有分页、筛选、排序和导出。
 
 质量状态建议值：
 
@@ -90,19 +96,19 @@
 
 ### `GET /api/v1/dashboard/overview`（公司总览）
 
-参数：
+状态：当前已实现，本轮前端必须接入。
 
-- `mode`：`latest`（最新状态）或 `same_day`（同日汇总）。
-- `as_of`：同日汇总日期。
-- `range`：收益和回撤区间。
+当前参数只有可选 `as_of`（估值日）。未传时每只启用产品取最新已发布版本；传入时按精确估值日查询，不回退到更早日期。`mode`（模式）和 `range`（区间）明确延期。
 
 当前实现的 `as_of`（估值日）按精确估值日筛选已发布版本；没有该日已发布数据的产品不回退到更早日期，并在 `coverage`（覆盖率）中体现缺口。停用产品不进入看板查询。
 
-返回：总净资产、产品数、覆盖率、公司收益、综合指数、回撤、风险数量、产品概览和质量状态。
+返回：总净资产、产品数、覆盖率、公司日收益、公司综合指数、风险数量、产品概览和质量状态。公司回撤和公司历史序列当前不在该响应中，明确延期。
 
 ### `GET /api/v1/funds`（产品列表）
 
-参数：名称、状态、策略、质量状态、日期、分页和排序。
+状态：当前已实现，本轮前端必须接入。
+
+参数只有 `q`（产品名称）、`status`（状态）、`as_of`（估值日）、`page` 和 `page_size`（分页）。首期没有策略、负责人、质量、风险、日期范围或排序参数。
 
 ### `POST /api/v1/funds`（新增产品）
 
@@ -113,6 +119,8 @@
 ### `GET /api/v1/funds/{fund_id}`（产品详情）
 
 返回产品主数据、当前已发布版本和质量状态。
+
+兼容响应仍可能包含 `strategy`（策略）和 `manager`（负责人）空字段，但首期前端不展示、不维护，也不将其作为业务数据。
 
 ### `PATCH /api/v1/funds/{fund_id}`（修改产品）
 
@@ -141,27 +149,31 @@
 
 ### `GET /api/v1/funds/{fund_id}/overview`（产品概览）
 
-参数：估值日、区间、净值序列类型。
+状态：明确延期。当前没有该页面查询路由；已有同名 CSV（逗号分隔文件）导出不能当作页面 JSON（结构化数据）接口。
 
 ### `GET /api/v1/funds/{fund_id}/nav-series`（净值序列）
 
-返回日期、单位净值、累计单位净值、日收益、累计收益、回撤、峰值信息和口径标识。
+状态：当前已实现，本轮前端必须接入。参数为可选 `start`（开始日期）和 `end`（结束日期）。
+
+返回日期、单位净值、累计单位净值、累计派现、调整后净值、日收益、累计收益、分析状态、分析运行编号、指标来源和口径标识。独立回撤与峰值序列当前不在该响应中，明确延期。
 
 ### `GET /api/v1/funds/{fund_id}/allocation`（资产配置）
 
-参数：估值日、历史区间、分母类型、展开层级。
+状态：明确延期。当前只有资产配置 CSV（逗号分隔文件）导出，没有页面 JSON（结构化数据）查询路由。
 
 ### `GET /api/v1/funds/{fund_id}/positions`（持仓）
 
-参数：估值日、账户、市场、资产类别、是否穿透合并、排序和分页。
+状态：当前已实现，本轮前端必须接入。
+
+参数只有可选 `as_of`（估值日）、`page` 和 `page_size`（分页）。响应中的 `market`（市场）和 `account`（账户）允许为空；当前页面接口没有账户、市场、资产类别、穿透合并或排序参数。集中度服务可按证券代码归并计算，但不是持仓页面操作。
 
 ### `GET /api/v1/funds/{fund_id}/share-classes`（份额类别）
 
-返回份额类别的净资产、资本、单位净值、累计净值、收益和对账差异。
+当前已实现的是份额类别主数据维护接口；份额每日净资产、实收资本、单位净值、累计净值和收益的页面 JSON（结构化数据）查询明确延期。份额每日 CSV（逗号分隔文件）导出已实现。
 
 ### `GET /api/v1/funds/{fund_id}/quality`（数据质量）
 
-返回当前版本的校验列表、版本差异和质量状态。
+状态：当前已实现，本轮前端必须接入。返回当前版本的校验列表和质量状态；版本差异查询明确延期。
 
 ## 4. 导入接口
 
@@ -169,7 +181,7 @@
 
 ### `POST /api/v1/imports`（创建导入批次）
 
-请求：来源类型、文件数量、客户端信息。返回批次编号和上传地址或上传令牌。
+请求只有 `source_type`（来源类型），返回批次信息。当前不返回上传地址或上传令牌。
 
 ### `POST /api/v1/imports/{batch_id}/files`（上传文件）
 
@@ -177,15 +189,15 @@
 
 ### `POST /api/v1/imports/{batch_id}/complete`（完成上传）
 
-服务端核对批次文件后创建数据库后台任务；Excel 解析由后续任务实现。
+服务端核对批次文件后创建数据库后台任务；worker（任务进程）已接入 Excel（电子表格）解析、标准化落库和校验。
 
 ### `GET /api/v1/imports`（导入列表）
 
-参数：来源、产品、估值日、状态、严重度、时间和分页。
+参数只有 `source_type`（来源类型）、`status`（批次状态）、`page` 和 `page_size`（分页）。
 
-### `GET /api/v1/imports/{import_id}`（导入详情）
+### `GET /api/v1/imports/{batch_id}`（导入详情）
 
-返回来源文件、邮件信息、识别结果、版本状态、任务状态和错误摘要。
+当前响应只返回批次基本信息、文件 id、原文件名、哈希、重复状态和后台任务基本状态。邮件信息、产品识别结果、估值版本状态、完整错误摘要和完整处理日志延期；校验结果通过独立的 validations（校验结果）接口查询。
 
 Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
@@ -214,47 +226,27 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 导入任务状态返回尝试次数、租约时间、结束时间、错误编号和是否可重试。独立 worker（任务进程）通过 `python -m app.worker` 串行领取数据库任务；领取使用独立短事务，解析业务写入若发现租约已失效会整体回滚，旧 worker 不能提交结果。
 
-### `GET /api/v1/imports/{import_id}/validations`（校验结果）
+### `GET /api/v1/imports/{batch_id}/validations`（校验结果）
 
 返回按严重度分组的规则结果和字段来源。
 
-### `POST /api/v1/imports/{import_id}/retry`（重试任务）
+### `POST /api/v1/imports/{batch_id}/retry`（重试任务）
 
 只允许技术失败或任务超时的记录重试。
 
-### `POST /api/v1/imports/{import_id}/publish`（发布版本）
+### 旧导入生命周期草案（不实现、不接入）
 
-请求：复核意见、是否确认警告。服务端再次检查状态和权限。
-
-### `POST /api/v1/imports/{import_id}/reject`（驳回版本）
-
-请求必须包含原因。
-
-### `POST /api/v1/imports/{import_id}/revoke`（撤回版本）
-
-影响看板，必须二次确认和原因。
-
-### `POST /api/v1/imports/{import_id}/restore`（恢复旧版本）
-
-将旧版本作为当前发布版本重新发布，保留完整审计。
-
-### `GET /api/v1/imports/{import_id}/source`（原始来源）
-
-返回受权限控制的临时下载地址或文件流，不暴露真实存储路径。
+旧的 `POST /api/v1/imports/{import_id}/publish|reject|revoke|restore`（导入生命周期路径）和 `GET /api/v1/imports/{import_id}/source`（旧来源路径）不实现、不接入；正式功能已经由 `POST /api/v1/valuations/{version_id}/publish|reject|revoke|restore`（估值版本生命周期路径）及 `GET /api/v1/imports/{batch_id}/source/{source_file_id}`（受控原文件下载路径）替代。
 
 ## 5. 复核和风险接口
 
 ### `GET /api/v1/reviews`（复核队列）
 
-参数：状态、产品、严重度、异常类型、时间和分页。
+状态：当前已实现，本轮前端必须接入。当前无筛选和分页参数，返回全部待复核版本的最小摘要。
 
-### `POST /api/v1/reviews/{review_id}/acknowledge`（确认并继续）
+### `POST /api/v1/reviews/{version_id}/acknowledge`（确认并继续）
 
-记录复核人、意见和是否允许发布。
-
-### `POST /api/v1/reviews/{review_id}/known-exception`（标记已知例外）
-
-必须包含有效期、适用范围和理由。
+实际路径使用 `version_id`（估值版本编号），不是独立 review（复核）资源编号；记录复核意见和是否允许发布，结果状态为 `publishable`（可发布）或 `rejected`（已驳回）。完整复核详情、字段来源、上一版本差异和筛选分页当前不提供。
 
 ### `GET /api/v1/risk/events`（风险事件）
 
@@ -266,7 +258,7 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 ### `POST /api/v1/risk/rules`（新增风险规则）
 
-权限：`admin`（系统管理员）或 `operator`（业务员）。请求包括 `rule_code`、`rule_type`、`scope`、`threshold`、`severity`、有效期和 `enabled`。`rule_type` 只支持 evaluator（规则计算器）已有的日收益、回撤、单票权重、前五大权重和集中度规则；不接入外部行情能力。
+权限：`admin`（系统管理员）或 `operator`（业务员）。请求包括 `rule_code`、`rule_type`、`scope`、`threshold`、`severity`、有效期和 `enabled`。`rule_type` 只支持以下六种：`daily_return`（日收益）、`max_drawdown`（最大回撤）、`current_drawdown`（当前回撤）、`single_position_weight`（单票权重）、`top_five_weight`（前五大权重）和 `concentration`（集中度）；不接入外部行情能力。
 
 ### `PATCH /api/v1/risk/rules/{rule_id}`（创建规则新版本）
 
@@ -292,11 +284,11 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 ### `POST /api/v1/mail/test-connection`（测试连接）
 
-不导入附件。
+仅 `admin`（系统管理员），不导入附件。
 
 ### `POST /api/v1/mail/sync`（立即同步）
 
-返回同步任务编号。
+`admin`（系统管理员）和 `operator`（业务员）可用；当前同步在请求内执行并返回同步运行结果，不宣称返回后台任务编号。
 
 ### `GET /api/v1/mail/sync-runs`（同步记录）
 
@@ -309,9 +301,12 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `GET/POST/PATCH /api/v1/subjects/mappings`（科目映射查询和维护）。
 - `POST /api/v1/subjects/mappings/{mapping_id}/disable`（停用科目映射，可带停用原因）。
 - `GET/POST /api/v1/risk/rules`、`PATCH /api/v1/risk/rules/{rule_id}`（风险规则查询和版本化维护）。
-- `GET/POST/PATCH /api/v1/users`（账号查询和管理员维护）。
+- `GET /api/v1/users`（用户列表，支持账号关键字、角色、状态和分页）。
+- `POST /api/v1/users`（创建用户）。
+- `PATCH /api/v1/users/{user_id}/role`（修改角色）。
+- `POST /api/v1/users/{user_id}/enable` 或 `/disable`（启用或禁用用户）。
 - `POST /api/v1/users/{user_id}/reset-password`（管理员重置密码）。
-- `POST /api/v1/users/{user_id}/disable`（禁用账号）。
+- `POST /api/v1/users/{user_id}/revoke-sessions`（撤销全部会话）。
 - `GET /api/v1/audit-logs`（审计查询）。
 - `GET/PATCH /api/v1/system/settings`（系统设置，管理员）。
 - `GET /api/v1/system/health`（健康检查，不返回敏感配置）。
@@ -374,3 +369,16 @@ CSV 使用 UTF-8 BOM（字节顺序标记），便于 Windows（视窗系统）E
 ### 导入处理报告
 
 `GET /api/v1/exports/imports`（导入处理报告）仅允许 `admin`（管理员）和 `operator`（业务员），`viewer`（普通看板）返回 403。可选筛选参数为 `source_type`（来源类型）、`status`（批次状态）、`start`（创建起始日期）和 `end`（创建结束日期）。字段为批次编号、来源、文件数、批次状态、任务状态和创建时间；原始文件下载仍使用导入接口的受控原始文件路径，不在导出接口中暴露存储对象名。
+
+## 11. 明确延期接口
+
+以下能力当前没有闭环接口，首期前端隐藏：
+
+- `POST /api/v1/reviews/{id}/known-exception`（标记已知例外）及撤销例外。
+- 重新解析、重新校验。
+- 产品页面概览、资产配置、份额每日数据、独立回撤序列。
+- 版本历史、版本差异和统一字段来源查询。
+- 网页目录导入、科目映射导入、命中样本、测试规则和风险试算。
+- 导入初步识别摘要、完整处理日志、邮件附件导航和来源筛选、复核筛选分页与复核详情。
+
+邮箱授权码更新、邮件暂停/恢复和原始文件清理预演/执行不在延期列表；这些接口已经实现，正式前端必须按本文件的角色和安全边界接入。

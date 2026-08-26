@@ -1,139 +1,56 @@
-# 私募基金估值分析看板 — 前端 Demo
+# 私募基金估值分析看板前端 Demo（模拟原型）
 
-自包含的 Vite + React 18 + TypeScript 单页应用，完整实现 `docs/02-页面与交互设计.md`
-中定义的全部 16 个页面与 6 个详情页签，内置贴合真实后端契约的 mock 数据层，无需启动后端即可演示全部交互。
+这是冻结的 Vite（前端构建工具）+ React（前端框架）+ TypeScript（类型语言）模拟原型，用于确认页面布局、导航和交互方向，不代表业务功能已经完成，也不能作为数据真实性、计算口径或正式接口完成度的验收依据。
 
-## 技术栈
+当前页面仍从 `src/mock`（模拟数据目录）读取数据。该目录不会在本轮删除，但后续生产入口不得引用其中的模拟接口或种子数据。
 
-| 层 | 选型 |
-|---|---|
-| 框架 | React 18 + TypeScript（strict） |
-| 构建 | Vite 5 |
-| 组件库 | Ant Design 5（经 ThemeConfig + CSS 变量定制，刻意偏离默认观感） |
-| 路由 | React Router 6（`createBrowserRouter` + 懒加载 + `Suspense`） |
-| 图表 | Recharts 2 |
-| 日期 | dayjs |
-| 数据 | 内置 `src/mock/` 契约级 mock（`{data,meta}` 包络、decimal 字符串、enum 字符串） |
-
-## 快速开始
+## 运行原型
 
 ```bash
 cd frontend
 npm install
-npm run dev      # 开发服务器，默认 http://127.0.0.1:5173
-npm run build    # 类型检查 + 生产构建，产物在 dist/
-npm run preview  # 预览生产构建
+npm run dev
+npm run typecheck
+npm run build
 ```
 
-## 角色与登录
+## 原型安全边界
 
-登录页可切换三种角色，导航随角色变化：
+- 登录页允许任意密码仅用于 mock（模拟）演示；正式入口必须删除该行为，接入后端认证、会话和角色权限。
+- 原型生成的 8 个产品以及其中的策略、负责人、持仓、风险事件、版本、导入批次、邮件记录、备份状态和固定数值全部是虚构内容，不得进入生产数据库或生产页面。
+- 前端隐藏按钮和导航不是权限控制；正式系统以后端鉴权为最终边界。
+- 浏览器当前生成的 CSV（逗号分隔文件）只反映模拟数据，正式入口必须调用后端导出接口。
+- 原型中的来源链接、固定日期、固定版本、固定覆盖率和固定业务数字不得作为正式结果。
 
-| 角色 | 账号 | 可见导航 |
-|---|---|---|
-| 管理员 admin | `admin` | 全部 5 组 16 页 |
-| 业务员 operator | `operator` | 总览、产品分析、数据运营、基础配置、审计日志 |
-| 普通看板 viewer | `viewer` | 总览、产品分析 |
+## 首期正式能力分层
 
-任意密码均可登录（demo）。普通看板角色隐藏所有写操作按钮（`RoleGuard` + `can()` 权限函数）。
+正式接入以 `docs/02-页面与交互设计.md` 和 `docs/05-API-接口草案.md` 的冻结状态为准，采用以下四类：
 
-## 页面清单
+- A（已有页面接口，可立即真实接入）：登录、初始化、账号和审计查询；公司总览、产品列表、产品详情摘要、净值序列、持仓、数据质量；导入批次基本操作、复核最小摘要、估值版本发布/驳回/撤回/恢复；邮件设置/受控授权码/测试/立即同步/暂停恢复/同步日志；风险事件和六类规则；系统设置、运维摘要、清理预演和管理员确认执行。
+- B（只有 CSV 导出，不等于页面接口）：资产配置、份额每日数据。正式前端暂不把 CSV 导出当页面查询。
+- C（字段或数据已落库，但页面接口未完成）：季度收益、累计派现、份额实收资本、份额日收益、可空市场、可空账户、行级来源。首期不接入页面，待页面接口完成后再接入。
+- D（明确延期并隐藏）：完整分析概览、独立回撤/峰谷、版本历史/差异、统一字段来源、导入识别摘要、完整处理日志、邮件附件导航/来源筛选、复核筛选分页/详情，以及无闭环的运营按钮。
 
-| # | 页面 | 路由 | 角色 |
-|---|---|---|---|
-| 1 | 登录 | `/login` | — |
-| 2 | 首次初始化 | `/initialize` | — |
-| 3 | 公司总览 | `/dashboard` | 全部 |
-| 4 | 风险概览 | `/risk` | 全部 |
-| 5 | 产品列表 | `/funds` | 全部 |
-| 6 | 产品详情 | `/funds/:id` | 全部 |
-| 6.1 | ├ 概览 | | |
-| 6.2 | ├ 净值和回撤 | | |
-| 6.3 | ├ 资产配置 | | |
-| 6.4 | ├ 持仓 | | |
-| 6.5 | ├ 份额类别 | | |
-| 6.6 | └ 数据质量 | | |
-| 7 | 导入中心 | `/imports` | admin/operator |
-| 8 | 异常复核 | `/reviews` | admin/operator |
-| 9 | 邮件接入 | `/mail` | admin/operator |
-| 10 | 产品管理 | `/admin/funds` | admin/operator |
-| 11 | 科目与模板 | `/admin/subjects` | admin/operator |
-| 12 | 风险规则 | `/admin/risk-rules` | admin/operator |
-| 13 | 账号管理 | `/admin/users` | admin |
-| 14 | 审计日志 | `/admin/audit` | admin/operator |
-| 15 | 系统设置 | `/admin/settings` | admin |
-| 16 | 数据保留和备份 | `/admin/retention` | admin |
+## 首期隐藏或移除
 
-## 跨页面交互约定（文档 §1，已全部落实）
+- 策略、负责人、基金经理、业绩基准及相关筛选和汇总。
+- 穿透合并按钮；集中度可在后端按证券代码归并，但不改变持仓明细。
+- 重新解析、重新校验、标记或撤销已知例外。
+- 网页目录导入、科目映射导入、命中样本、测试规则和风险试算。
+- 尚无闭环页面接口的完整分析概览、资产配置查询、份额每日查询、独立回撤序列、版本历史、版本差异和统一字段来源入口。
+- 任何只修改浏览器本地状态、只弹出演示提示或依赖固定模拟结果的操作。
 
-- 所有列表支持分页、筛选、排序。
-- 每个数据页顶部「状态栏」（签名元素）：数据截至 / 已发布版本 / 覆盖率 / 质量状态。
-- 进行中任务轮询（2s → 连续无变化后 5s，页面离开或完成即停）。
-- 破坏性操作二次确认 + 填写原因（`ConfirmProvider` + `useConfirm`）。
-- 普通看板隐藏写按钮（`RoleGuard` + `can()`）。
-- 关键数字旁「查看来源」入口（`SourceLink`）。
-- 导出只导出当前筛选数据，文件写入导出时间（`exportCsv`，Blob 下载）。
+## 页面路由
 
-## 设计方向
-
-遵循 `emil-design-eng` 动效框架与反模板审美（避开 cream+serif+terracotta / near-black+acid-green /
-newspaper-hairlines 三个 AI 默认）：
-
-- **配色**：5 个命名 token（`--ink` 海军蓝 / `--paper` 画布底 / `--rule` 分隔线 / `--accent` 信号蓝
-  / `--amber` + `--crimson` + `--sage` 三色语义克制）。
-- **字体**：正文无衬线 + 所有数字用等宽 `ui-monospace / JetBrains Mono`，数字成为视觉记忆点。
-- **签名元素**：状态栏四格横条，质量格用语义圆点（有效=sage 常驻，警告=amber 呼吸，阻断=crimson 静态，处理中=sage 脉冲）。
-- **动效**：列表 hover 极简（仅背景，无 transform），页面无入场动画，键盘动作零动画；抽屉/弹窗 240ms
-  `cubic-bezier(0.23,1,0.32,1)`；按钮 `:active` `scale(0.97)` 140ms；`prefers-reduced-motion` 关闭所有 transform。
-- 破坏性操作「慢按快放」：确认刻意，反馈即时。
-
-## 文件结构
-
-```
-frontend/
-  package.json  tsconfig.json  tsconfig.node.json  vite.config.ts  index.html  .gitignore
-  src/
-    main.tsx                          # 入口：ConfigProvider + AntdApp + AuthProvider + Router
-    app/
-      theme.ts                        # AntD ThemeConfig + palette
-      auth.tsx                        # AuthProvider（sessionStorage，登录/登出/切换角色）
-      router.tsx                      # createBrowserRouter + 懒加载 + 角色守卫
-      layout.tsx                      # AppLayout（可折叠暗色侧栏 + 顶栏角色切换）
-    mock/
-      db.ts                           # 种子数据（8 只基金、60 交易日序列、导入批次、风险、审计等）
-      api.ts                          # 异步函数集，返回 {data,meta} 包络，180-420ms 延迟
-    components/
-      index.tsx                       # Num / QualityBadge / StatusRibbon / PageHeader / RoleGuard
-                                      # ConfirmProvider+useConfirm / SourceLink / LevelTag
-                                      # EmptyState / usePolling / useToast
-    utils/
-      constants.ts                    # 所有 TS 类型 + 中文标签映射 + SETTING_DEFINITIONS
-      permissions.ts                  # 角色权限矩阵 + can() + navForRole()
-      format.ts                       # dec/pct/weight/dateStr/timeStr/exportCsv/sleep
-    styles/
-      globals.css                     # CSS 变量 + .num 等宽 + .q-dot 语义圆点 + reduced-motion
-    pages/
-      Login.tsx  Initialize.tsx  Dashboard.tsx  RiskOverview.tsx
-      Funds.tsx  FundDetail/index.tsx
-      FundDetail/tabs/{Overview,NavDrawdown,Allocation,Positions,ShareClasses,Quality}.tsx
-      Imports.tsx  Reviews.tsx  Mail.tsx
-      AdminFunds.tsx  AdminSubjects.tsx  AdminRiskRules.tsx
-      AdminUsers.tsx  AdminAudit.tsx  AdminSettings.tsx  AdminRetention.tsx
-```
+原型保留现有路由用于设计审阅，包括公司总览、风险概览、产品列表与详情、导入中心、异常复核、邮件接入，以及产品、科目、风险规则、账号、审计、系统设置和数据保留管理页面。路由存在只表示原型页面存在，不表示对应业务已经完成；正式入口必须按 A/B/C/D 分层裁剪。
 
 ## Mock 数据层
 
-`src/mock/db.ts` 生成完整种子数据，`src/mock/api.ts` 提供与真实后端契约对齐的异步接口：
-
-- **字段名**：与后端模型列名逐一对应（`fund_daily_snapshot`、`account_subject_daily`、
-  `position_daily`、`share_class_daily_snapshot`、`drawdown_result`、`company_metric_daily` 等）。
-- **序列化**：decimal 用字符串（如 `"1.2500000000"`），enum 用字符串值（如 `"published"`、`"critical"`）。
-- **响应包络**：统一 `{ data, meta }`，列表增加 `{ page, page_size, total }`。
-- **版本状态机**：`received → parsing → validating → publishable → published`，
-  `published → superseded/revoked`，`superseded → restored → published`。
+- `src/mock/db.ts` 生成 8 个虚构产品和配套模拟记录。
+- `src/mock/api.ts` 提供供原型调用的异步函数，但并非每个函数都对应当前后端端点，其参数、分页、状态机和返回结构也不能视为正式契约。
+- 对接真实后端时必须逐页按 `docs/05-API-接口草案.md` 标注的“当前已实现”“本轮前端必须接入”“明确延期”处理，不得假设替换请求地址即可零改动上线。
+- `vite.config.ts` 中的 `/api` 和 `/health` 代理只用于本地开发，不改变上述业务边界。
 
 ## 对接真实后端
 
-`src/mock/api.ts` 中的每个函数对应一个后端端点。替换为真实 `fetch` 调用时，
-保持返回值的 `{data,meta}` 结构不变即可零改动接入。`vite.config.ts` 已配置
-`/api` 和 `/health` 代理到 `http://127.0.0.1:8000`。
+正式接入必须建立真实 API（接口）适配层，逐项处理鉴权、参数、分页、错误、空值、权限和任务状态。生产入口不得继续引用 `src/mock`（模拟数据目录）。
