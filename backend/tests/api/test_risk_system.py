@@ -100,6 +100,20 @@ def test_risk_rule_patch_creates_new_version_and_keeps_history(
         assert actions.count("risk_rule.version_created") == 2
 
 
+def test_risk_write_payloads_reject_unknown_fields(admin_client: TestClient) -> None:
+    rule = admin_client.post(
+        "/api/v1/risk/rules",
+        json={
+            "rule_code": "strict_rule",
+            "rule_type": "daily_return",
+            "threshold": -0.05,
+            "unexpected": "must be rejected",
+        },
+    )
+
+    assert rule.status_code == 422
+
+
 def test_risk_rules_and_events_are_role_scoped(
     admin_client: TestClient, app_and_engine: tuple[object, object]
 ) -> None:
@@ -286,3 +300,19 @@ def test_mail_settings_has_no_persistent_write_endpoint(
         json={"host": "imap.example.test", "password": "secret"},
     )
     assert response.status_code == 405
+
+
+def test_system_health_is_non_sensitive_and_admin_only(
+    admin_client: TestClient,
+) -> None:
+    viewer = _create_user(admin_client, "viewer-health", "viewer")
+
+    response = admin_client.get("/api/v1/system/health")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "ok",
+        "database": "ok",
+        "service": "fund-dashboard-api",
+    }
+    assert viewer.get("/api/v1/system/health").status_code == 403

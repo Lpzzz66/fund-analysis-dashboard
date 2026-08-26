@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
@@ -79,6 +80,33 @@ def patch_system_settings(
     )
     session.commit()
     return {"data": settings, "meta": {"runtime_note": RUNTIME_NOTE}}
+
+
+@router.get("/system/health")
+def system_health(
+    _: SystemAdmin,
+    request: Request,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    """Return an authenticated, non-sensitive dependency health snapshot."""
+
+    try:
+        session.execute(select(1))
+    except SQLAlchemyError:
+        return {
+            "data": {
+                "status": "degraded",
+                "database": "unavailable",
+                "service": request.app.state.settings.service_name,
+            }
+        }
+    return {
+        "data": {
+            "status": "ok",
+            "database": "ok",
+            "service": request.app.state.settings.service_name,
+        }
+    }
 
 
 _SENSITIVE_KEY_PARTS = (

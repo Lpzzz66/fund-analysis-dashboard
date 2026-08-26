@@ -15,8 +15,10 @@ from app.auth.dependencies import AuthContext, get_auth_context, get_db
 from app.db.base import FundStatus, ValuationStatus
 from app.db.models import (
     Fund,
+    FundAlias,
     FundDailySnapshot,
     PositionDaily,
+    ShareClass,
     ValidationResult,
     ValuationVersion,
 )
@@ -215,6 +217,16 @@ def fund_detail(
     if fund is None:
         raise HTTPException(status_code=404, detail="Fund not found")
     version = _version_for_fund(session, fund_id, as_of)
+    aliases = session.scalars(
+        select(FundAlias)
+        .where(FundAlias.fund_id == fund.id)
+        .order_by(FundAlias.match_priority.desc(), FundAlias.id)
+    ).all()
+    share_classes = session.scalars(
+        select(ShareClass)
+        .where(ShareClass.fund_id == fund.id)
+        .order_by(ShareClass.share_code, ShareClass.id)
+    ).all()
     return {
         "data": {
             "id": fund.id,
@@ -224,6 +236,31 @@ def fund_detail(
             "manager": fund.manager,
             "establishment_date": fund.establishment_date,
             "notes": fund.notes,
+            "aliases": [
+                {
+                    "id": alias.id,
+                    "alias": alias.alias,
+                    "source_location": alias.source_location,
+                    "match_priority": alias.match_priority,
+                    "valid_from": alias.valid_from,
+                    "valid_to": alias.valid_to,
+                }
+                for alias in aliases
+            ],
+            "share_classes": [
+                {
+                    "id": share_class.id,
+                    "share_code": share_class.share_code,
+                    "share_name": share_class.share_name,
+                    "enabled_from": share_class.enabled_from,
+                    "disabled_from": share_class.disabled_from,
+                    "status": (
+                        "inactive" if share_class.disabled_from else "active"
+                    ),
+                    "notes": share_class.notes,
+                }
+                for share_class in share_classes
+            ],
             "status": fund.status,
             "current_version_id": version.id if version else None,
             "valuation_date": version.valuation_date.isoformat() if version else None,

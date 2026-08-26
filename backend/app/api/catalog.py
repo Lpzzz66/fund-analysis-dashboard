@@ -79,12 +79,12 @@ class AliasInput(StrictModel):
 
 class FundCreate(StrictModel):
     standard_name: str = Field(min_length=1, max_length=255)
-    product_code: str | None = Field(default=None, max_length=100)
-    establishment_date: date | None = None
+    product_code: str = Field(min_length=1, max_length=100)
+    establishment_date: date
     strategy: str | None = Field(default=None, max_length=255)
     manager: str | None = Field(default=None, max_length=255)
     notes: str | None = None
-    aliases: list[AliasInput] = Field(default_factory=list, max_length=100)
+    aliases: list[AliasInput] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="before")
     @classmethod

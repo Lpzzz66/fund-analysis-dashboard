@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -36,6 +36,8 @@ SUPPORTED_RULE_TYPES = {
 
 
 class RiskRuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rule_code: str = Field(min_length=1, max_length=100)
     rule_type: str = Field(min_length=1, max_length=100)
     scope: str = Field(default="all", min_length=1, max_length=100)
@@ -62,6 +64,8 @@ class RiskRuleCreate(BaseModel):
 
 
 class RiskRulePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rule_type: str | None = Field(default=None, min_length=1, max_length=100)
     scope: str | None = Field(default=None, min_length=1, max_length=100)
     threshold: Decimal | None = None
@@ -86,6 +90,8 @@ class RiskRulePatch(BaseModel):
 
 
 class RiskEventHandling(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: RiskEventStatus
     handling_note: str = Field(min_length=1, max_length=4000)
     evidence_reference: str | None = Field(default=None, max_length=1000)

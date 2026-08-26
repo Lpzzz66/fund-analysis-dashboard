@@ -56,6 +56,8 @@ def test_fund_crud_lifecycle_alias_conflict_and_audit(
         "/api/v1/funds",
         json={
             "standard_name": "千金一号",
+            "product_code": "QJ-001",
+            "establishment_date": "2024-01-01",
             "aliases": [{"alias": " 梦一号专用表 "}],
         },
     )
@@ -63,11 +65,22 @@ def test_fund_crud_lifecycle_alias_conflict_and_audit(
     assert "UNIQUE" not in duplicate_alias.text.upper()
 
     duplicate_name = admin_client.post(
-        "/api/v1/funds", json={"standard_name": " 梦一号 "}
+        "/api/v1/funds",
+        json={
+            "standard_name": " 梦一号 ",
+            "product_code": "M-002",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "梦一号新别名"}],
+        },
     )
     duplicate_code = admin_client.post(
         "/api/v1/funds",
-        json={"standard_name": "天策上将", "product_code": "m-001"},
+        json={
+            "standard_name": "天策上将",
+            "product_code": "m-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "天策上将估值表"}],
+        },
     )
     assert duplicate_name.status_code == 409
     assert duplicate_code.status_code == 409
@@ -120,6 +133,43 @@ def test_fund_crud_lifecycle_alias_conflict_and_audit(
     }.issubset(set(actions))
 
 
+def test_fund_create_requires_identity_fields_and_alias(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.post(
+        "/api/v1/funds", json={"standard_name": "缺少身份信息"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_fund_detail_returns_aliases_and_share_classes(
+    admin_client: TestClient,
+) -> None:
+    created = admin_client.post(
+        "/api/v1/funds",
+        json={
+            "standard_name": "详情产品",
+            "product_code": "DETAIL-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "详情产品估值表"}],
+        },
+    )
+    fund_id = created.json()["data"]["id"]
+    share_class = admin_client.post(
+        f"/api/v1/funds/{fund_id}/share-classes",
+        json={"share_code": "A", "share_name": "A类"},
+    )
+
+    detail = admin_client.get(f"/api/v1/funds/{fund_id}")
+
+    assert created.status_code == 201
+    assert share_class.status_code == 201
+    assert detail.status_code == 200
+    assert detail.json()["data"]["aliases"][0]["alias"] == "详情产品估值表"
+    assert detail.json()["data"]["share_classes"][0]["share_code"] == "A"
+
+
 def test_catalog_permissions_allow_operator_and_reject_viewer(
     admin_client: TestClient,
 ) -> None:
@@ -127,7 +177,13 @@ def test_catalog_permissions_allow_operator_and_reject_viewer(
     viewer = _role_client(admin_client, "viewer")
 
     operator_created = operator.post(
-        "/api/v1/funds", json={"standard_name": "业务员创建产品"}
+        "/api/v1/funds",
+        json={
+            "standard_name": "业务员创建产品",
+            "product_code": "OP-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "业务员估值表"}],
+        },
     )
     viewer_created = viewer.post(
         "/api/v1/funds", json={"standard_name": "看板不应创建产品"}
@@ -144,7 +200,13 @@ def test_share_class_lifecycle_and_snapshot_safe_fields(
     admin_client: TestClient,
 ) -> None:
     fund = admin_client.post(
-        "/api/v1/funds", json={"standard_name": "份额测试产品"}
+        "/api/v1/funds",
+        json={
+            "standard_name": "份额测试产品",
+            "product_code": "SHARE-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "份额测试估值表"}],
+        },
     ).json()["data"]
     fund_id = fund["id"]
 

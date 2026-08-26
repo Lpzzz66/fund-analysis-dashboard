@@ -53,7 +53,12 @@ def _valuation_xlsx() -> bytes:
 def test_upload_worker_publish_and_dashboard_read(admin_client, app_and_engine) -> None:
     admin_client.post(
         "/api/v1/funds",
-        json={"standard_name": "千金一号", "product_code": "QJ-001"},
+        json={
+            "standard_name": "千金一号",
+            "product_code": "QJ-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "千金一号___专用表"}],
+        },
     )
     batch_response = admin_client.post(
         "/api/v1/imports", json={"source_type": "upload"}
