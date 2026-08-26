@@ -104,7 +104,7 @@ fb79bd0 fix(dashboard): dedupe latest published versions in SQL, not Python
 - latin-1 / iso-8859-* / ascii 声明下，额外用 utf-8 strict 反向校验字节——若 utf-8 也成功，说明 charset 声明错误，整体拒绝；新增 `_fallback_filename` 用 `unnamed-<token>.<ext>` 兜底。
 
 **为何这样改：**
-- 保留名检查是不可绕过的：原始文件名只用作 `original_filename` 元数据，不参与路径拼接（路径已是 `secrets.token_hex(24) + ext`），但乱码会出现在 audit log、CSV 导出、邮件主题等所有展示位。  
+- 保留名检查是不可绕过的：原始文件名只用作 `original_filename` 元数据，不参与路径拼接（路径已是 `secrets.token_hex(24) + ext`），但乱码会出现在 audit log、CSV 导出、邮件主题等所有展示位。
 - locale 判别用 utf-8 反向校验：合法的 iso-8859-1 字节（如 `Héllo`）不通过 utf-8 strict（`é` 是 0xE9）；UTF-8 字节被错误声明为 latin-1 时，utf-8 strict 成功——这是最可靠的区分。
 
 **测试：**
