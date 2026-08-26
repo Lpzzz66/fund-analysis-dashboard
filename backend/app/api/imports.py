@@ -18,7 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
@@ -81,13 +81,16 @@ def list_batches(
     statement = select(ImportBatch).order_by(
         ImportBatch.created_at.desc(), ImportBatch.id.desc()
     )
+    count_statement = select(func.count(ImportBatch.id))
     if source_type is not None:
         statement = statement.where(ImportBatch.source_type == source_type)
+        count_statement = count_statement.where(ImportBatch.source_type == source_type)
     if status_filter is not None:
         statement = statement.where(ImportBatch.status == status_filter)
-    batches = list(session.scalars(statement))
+        count_statement = count_statement.where(ImportBatch.status == status_filter)
     offset = (page - 1) * page_size
-    page_batches = batches[offset : offset + page_size]
+    total = session.scalar(count_statement) or 0
+    page_batches = list(session.scalars(statement.offset(offset).limit(page_size)))
     batch_ids = [batch.id for batch in page_batches]
     jobs = (
         session.scalars(
@@ -108,7 +111,7 @@ def list_batches(
             }
             for batch in page_batches
         ],
-        "meta": {"page": page, "page_size": page_size, "total": len(batches)},
+        "meta": {"page": page, "page_size": page_size, "total": total},
     }
 
 

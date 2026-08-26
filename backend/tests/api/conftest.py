@@ -6,6 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.auth.dependencies import get_db
 from app.db.base import (
     Base,
@@ -26,9 +30,6 @@ from app.db.models import (
 from app.db.session import create_engine
 from app.main import create_app
 from app.publishing import PublishingService
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 @pytest.fixture()
@@ -74,6 +75,7 @@ def seed_published_fund(
     unit_nav: Decimal = Decimal("1.25"),
     daily_return: Decimal = Decimal("0.01"),
     fund_status: FundStatus = FundStatus.ACTIVE,
+    position_count: int = 1,
 ) -> tuple[int, int]:
     with Session(engine) as session:
         from sqlalchemy import select
@@ -103,15 +105,16 @@ def seed_published_fund(
                 daily_return=daily_return,
             )
         )
-        session.add(
-            PositionDaily(
-                valuation_version_id=version.id,
-                security_code="000001",
-                security_name="测试证券",
-                market_value=Decimal(1000),
-                nav_weight=Decimal("0.011111"),
+        for index in range(position_count):
+            session.add(
+                PositionDaily(
+                    valuation_version_id=version.id,
+                    security_code=f"{index + 1:06d}",
+                    security_name="测试证券",
+                    market_value=Decimal(1000 * (index + 1)),
+                    nav_weight=Decimal("0.011111"),
+                )
             )
-        )
         session.add(
             ValidationResult(
                 valuation_version_id=version.id,

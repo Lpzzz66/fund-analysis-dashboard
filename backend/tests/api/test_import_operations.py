@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from app.db.base import ImportBatchStatus, JobStatus, SourceType
 from app.db.models import (
     AuditLog,
@@ -8,7 +10,6 @@ from app.db.models import (
     ImportBatchFile,
     SourceFile,
 )
-from sqlalchemy.orm import Session
 
 from ..imports.conftest import make_xlsx_bytes
 
@@ -60,6 +61,31 @@ def test_import_list_source_download_and_validation_endpoint(
             )
             is not None
         )
+
+
+def test_import_list_reports_total_and_empty_out_of_range_page(admin_client) -> None:
+    for _ in range(3):
+        created = admin_client.post(
+            "/api/v1/imports",
+            json={"source_type": "upload"},
+        )
+        assert created.status_code == 201
+
+    last_page = admin_client.get("/api/v1/imports", params={"page": 2, "page_size": 2})
+    out_of_range = admin_client.get(
+        "/api/v1/imports", params={"page": 3, "page_size": 2}
+    )
+
+    assert last_page.status_code == 200
+    assert len(last_page.json()["data"]) == 1
+    assert last_page.json()["meta"] == {"page": 2, "page_size": 2, "total": 3}
+    assert out_of_range.status_code == 200
+    assert out_of_range.json()["data"] == []
+    assert out_of_range.json()["meta"] == {
+        "page": 3,
+        "page_size": 2,
+        "total": 3,
+    }
 
 
 def test_failed_import_can_be_manually_retried(admin_client, app_and_engine) -> None:

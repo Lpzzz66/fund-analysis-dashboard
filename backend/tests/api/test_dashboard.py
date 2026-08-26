@@ -57,6 +57,49 @@ def test_dashboard_has_date_and_pagination_filters(
     assert overview.json()["data"]["total_net_assets"] == "90000.0000000000"
 
 
+def test_fund_list_reports_total_and_empty_out_of_range_page(
+    admin_client, app_and_engine
+) -> None:
+    for name in ("甲产品", "乙产品", "丙产品"):
+        seed_published_fund(app_and_engine[1], name=name)
+
+    last_page = admin_client.get("/api/v1/funds", params={"page": 2, "page_size": 2})
+    out_of_range = admin_client.get("/api/v1/funds", params={"page": 3, "page_size": 2})
+
+    assert last_page.status_code == 200
+    assert len(last_page.json()["data"]) == 1
+    assert last_page.json()["meta"] == {"page": 2, "page_size": 2, "total": 3}
+    assert out_of_range.status_code == 200
+    assert out_of_range.json()["data"] == []
+    assert out_of_range.json()["meta"] == {
+        "page": 3,
+        "page_size": 2,
+        "total": 3,
+    }
+
+
+def test_positions_report_total_and_empty_out_of_range_page(
+    admin_client, app_and_engine
+) -> None:
+    fund_id, _ = seed_published_fund(app_and_engine[1], position_count=3)
+
+    last_page = admin_client.get(
+        f"/api/v1/funds/{fund_id}/positions",
+        params={"page": 2, "page_size": 2},
+    )
+    out_of_range = admin_client.get(
+        f"/api/v1/funds/{fund_id}/positions",
+        params={"page": 3, "page_size": 2},
+    )
+
+    assert last_page.status_code == 200
+    assert len(last_page.json()["data"]) == 1
+    assert last_page.json()["meta"]["total"] == 3
+    assert out_of_range.status_code == 200
+    assert out_of_range.json()["data"] == []
+    assert out_of_range.json()["meta"]["total"] == 3
+
+
 def test_dashboard_uses_exact_date_and_excludes_inactive_funds(
     admin_client, app_and_engine
 ) -> None:

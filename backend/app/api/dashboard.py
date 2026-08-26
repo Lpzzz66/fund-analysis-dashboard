@@ -172,15 +172,19 @@ def list_funds(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, object]:
     statement = select(Fund).order_by(Fund.standard_name, Fund.id)
+    count_statement = select(func.count(Fund.id))
     if q:
-        statement = statement.where(Fund.standard_name.contains(q.strip()))
+        filter_condition = Fund.standard_name.contains(q.strip())
+        statement = statement.where(filter_condition)
+        count_statement = count_statement.where(filter_condition)
     if status is not None:
         statement = statement.where(Fund.status == status)
-    funds = list(session.scalars(statement))
-    total = len(funds)
+        count_statement = count_statement.where(Fund.status == status)
+    total = session.scalar(count_statement) or 0
     offset = (page - 1) * page_size
     data = []
-    for fund in funds[offset : offset + page_size]:
+    funds = list(session.scalars(statement.offset(offset).limit(page_size)))
+    for fund in funds:
         version = _version_for_fund(session, fund.id, as_of)
         snapshot = _snapshot(session, version.id) if version else None
         data.append(
@@ -254,9 +258,7 @@ def fund_detail(
                     "share_name": share_class.share_name,
                     "enabled_from": share_class.enabled_from,
                     "disabled_from": share_class.disabled_from,
-                    "status": (
-                        "inactive" if share_class.disabled_from else "active"
-                    ),
+                    "status": ("inactive" if share_class.disabled_from else "active"),
                     "notes": share_class.notes,
                 }
                 for share_class in share_classes
@@ -348,8 +350,16 @@ def positions(
         .where(PositionDaily.valuation_version_id == version.id)
         .order_by(PositionDaily.market_value.desc(), PositionDaily.id)
     )
-    all_rows = list(session.scalars(statement))
     offset = (page - 1) * page_size
+    total = (
+        session.scalar(
+            select(func.count(PositionDaily.id)).where(
+                PositionDaily.valuation_version_id == version.id
+            )
+        )
+        or 0
+    )
+    rows = session.scalars(statement.offset(offset).limit(page_size))
     return {
         "data": [
             {
@@ -363,12 +373,12 @@ def positions(
                 "nav_weight": _decimal(row.nav_weight),
                 "suspension_info": row.suspension_info,
             }
-            for row in all_rows[offset : offset + page_size]
+            for row in rows
         ],
         "meta": {
             "page": page,
             "page_size": page_size,
-            "total": len(all_rows),
+            "total": total,
             "valuation_date": version.valuation_date.isoformat(),
         },
     }
