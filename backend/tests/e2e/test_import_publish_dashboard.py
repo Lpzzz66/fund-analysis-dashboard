@@ -89,10 +89,15 @@ def test_upload_worker_publish_and_dashboard_read(admin_client, app_and_engine) 
         json={"confirm_warnings": True, "reason": "端到端验收"},
     )
     assert published.status_code == 200
+    with Session(app_and_engine[1]) as session:
+        analysis_result = process_next_job(session, admin_client.app.state.settings)
+        assert analysis_result is not None
     overview = admin_client.get("/api/v1/dashboard/overview")
     assert overview.status_code == 200
     assert overview.json()["data"]["fund_count"] == 1
     assert overview.json()["data"]["funds"][0]["name"] == "千金一号"
+    assert overview.json()["data"]["funds"][0]["analysis_status"] == "ready"
+    assert overview.json()["meta"]["analysis_status"] == "ready"
 
 
 def test_viewer_cannot_write_or_publish(admin_client, app_and_engine) -> None:

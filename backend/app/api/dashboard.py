@@ -12,12 +12,21 @@ from sqlalchemy.orm import Session
 
 from app.analytics.nav import calculate_nav_series
 from app.auth.dependencies import AuthContext, get_auth_context, get_db
-from app.db.base import FundStatus, ValuationStatus
+from app.db.base import (
+    AnalysisRunStatus,
+    FundStatus,
+    RiskEventStatus,
+    ValuationStatus,
+)
 from app.db.models import (
+    AnalysisRun,
+    CompanyMetricDaily,
     Fund,
     FundAlias,
     FundDailySnapshot,
+    FundMetricDaily,
     PositionDaily,
+    RiskEvent,
     ShareClass,
     ValidationResult,
     ValuationVersion,
@@ -91,6 +100,96 @@ def _quality_status(session: Session, version_id: int) -> str:
     return "valid"
 
 
+def _analysis_run_for_version(
+    session: Session, version: ValuationVersion
+) -> AnalysisRun | None:
+    return session.scalar(
+        select(AnalysisRun)
+        .join(FundMetricDaily, FundMetricDaily.source_analysis_run_id == AnalysisRun.id)
+        .where(
+            AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
+            FundMetricDaily.fund_id == version.fund_id,
+            FundMetricDaily.valuation_date == version.valuation_date,
+        )
+        .order_by(AnalysisRun.id.desc())
+        .limit(1)
+    )
+
+
+def _analysis_status(session: Session, version: ValuationVersion) -> str:
+    latest = session.scalar(
+        select(AnalysisRun)
+        .join(
+            ValuationVersion,
+            ValuationVersion.id == AnalysisRun.trigger_version_id,
+        )
+        .where(
+            ValuationVersion.fund_id == version.fund_id,
+            AnalysisRun.input_start_date.is_not(None),
+            AnalysisRun.input_start_date <= version.valuation_date,
+            (AnalysisRun.input_end_date.is_(None))
+            | (AnalysisRun.input_end_date >= version.valuation_date),
+        )
+        .order_by(AnalysisRun.id.desc())
+        .limit(1)
+    )
+    if latest is None:
+        return "pending"
+    if latest.status == AnalysisRunStatus.SUCCEEDED:
+        return "ready" if _analysis_run_for_version(session, version) else "stale"
+    if latest.status == AnalysisRunStatus.FAILED:
+        return "stale"
+    return "pending"
+
+
+def _metric_for_version(
+    session: Session, version: ValuationVersion
+) -> FundMetricDaily | None:
+    run = _analysis_run_for_version(session, version)
+    if run is None or run.status != AnalysisRunStatus.SUCCEEDED:
+        return None
+    return session.scalar(
+        select(FundMetricDaily).where(
+            FundMetricDaily.fund_id == version.fund_id,
+            FundMetricDaily.valuation_date == version.valuation_date,
+            FundMetricDaily.source_analysis_run_id == run.id,
+        )
+    )
+
+
+def _latest_company_metric(
+    session: Session, as_of: date | None
+) -> tuple[CompanyMetricDaily | None, AnalysisRun | None]:
+    published_date_exists = (
+        select(ValuationVersion.id)
+        .where(
+            ValuationVersion.status == ValuationStatus.PUBLISHED,
+            ValuationVersion.valuation_date == CompanyMetricDaily.valuation_date,
+        )
+        .exists()
+    )
+    statement = (
+        select(CompanyMetricDaily, AnalysisRun)
+        .join(AnalysisRun, AnalysisRun.id == CompanyMetricDaily.source_analysis_run_id)
+        .where(
+            AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
+            published_date_exists,
+        )
+        .order_by(
+            CompanyMetricDaily.valuation_date.desc(),
+            AnalysisRun.id.desc(),
+            CompanyMetricDaily.id.desc(),
+        )
+    )
+    if as_of is not None:
+        statement = statement.where(CompanyMetricDaily.valuation_date == as_of)
+    row = session.execute(statement.limit(1)).first()
+    if row is None:
+        return None, None
+    metric, run = row
+    return metric, run
+
+
 @router.get("/api/v1/dashboard/overview")
 def overview(
     _: CurrentContext,
@@ -118,14 +217,41 @@ def overview(
         ),
         Decimal(0),
     )
+    open_risk_count = (
+        session.scalar(
+            select(func.count(RiskEvent.id)).where(
+                RiskEvent.status.in_(
+                    (RiskEventStatus.OPEN, RiskEventStatus.ACKNOWLEDGED)
+                )
+            )
+        )
+        or 0
+    )
+    analysis_states = [_analysis_status(session, version) for version in versions]
+    analysis_status = (
+        "stale"
+        if "stale" in analysis_states
+        else "pending"
+        if "pending" in analysis_states or not analysis_states
+        else "ready"
+    )
+    company_metric, company_run = (
+        _latest_company_metric(session, as_of)
+        if analysis_status == "ready"
+        else (None, None)
+    )
     return {
         "data": {
             "as_of": as_of.isoformat() if as_of else None,
             "total_net_assets": _decimal(total_net_assets) if snapshots else None,
             "fund_count": len(selected_fund_ids),
-            "company_index": None,
-            "company_daily_return": None,
-            "risk_event_count": 0,
+            "company_index": _decimal(company_metric.company_index)
+            if company_metric
+            else None,
+            "company_daily_return": _decimal(company_metric.company_daily_return)
+            if company_metric
+            else None,
+            "risk_event_count": open_risk_count,
             "quality_status": (
                 "warning"
                 if any(
@@ -139,6 +265,8 @@ def overview(
         "meta": {
             "as_of": as_of.isoformat() if as_of else None,
             "coverage": {"available": len(selected_fund_ids), "total": total},
+            "analysis_status": analysis_status,
+            "analysis_run_id": company_run.id if company_run else None,
         },
     }
 
@@ -149,13 +277,28 @@ def _overview_funds(
     data: list[dict[str, object]] = []
     for version in versions:
         snapshot = _snapshot(session, version.id)
+        analysis_status = _analysis_status(session, version)
+        analysis_run = (
+            _analysis_run_for_version(session, version)
+            if analysis_status == "ready"
+            else None
+        )
+        metric = _metric_for_version(session, version)
         data.append(
             {
                 "id": version.fund_id,
                 "name": version.fund.standard_name,
                 "valuation_date": version.valuation_date.isoformat(),
                 "unit_nav": _decimal(snapshot.unit_nav) if snapshot else None,
-                "daily_return": _decimal(snapshot.daily_return) if snapshot else None,
+                "daily_return": _decimal(
+                    metric.daily_return
+                    if metric is not None
+                    else snapshot.daily_return
+                    if snapshot
+                    else None
+                ),
+                "analysis_status": analysis_status,
+                "analysis_run_id": analysis_run.id if analysis_run else None,
             }
         )
     return data
@@ -187,6 +330,13 @@ def list_funds(
     for fund in funds:
         version = _version_for_fund(session, fund.id, as_of)
         snapshot = _snapshot(session, version.id) if version else None
+        analysis_status = _analysis_status(session, version) if version else "pending"
+        analysis_run = (
+            _analysis_run_for_version(session, version)
+            if version and analysis_status == "ready"
+            else None
+        )
+        metric = _metric_for_version(session, version) if version else None
         data.append(
             {
                 "id": fund.id,
@@ -198,10 +348,18 @@ def list_funds(
                 if version
                 else None,
                 "unit_nav": _decimal(snapshot.unit_nav) if snapshot else None,
-                "daily_return": _decimal(snapshot.daily_return) if snapshot else None,
+                "daily_return": _decimal(
+                    metric.daily_return
+                    if metric is not None
+                    else snapshot.daily_return
+                    if snapshot
+                    else None
+                ),
                 "quality_status": _quality_status(session, version.id)
                 if version
                 else "pending",
+                "analysis_status": analysis_status,
+                "analysis_run_id": analysis_run.id if analysis_run else None,
             }
         )
     return {
@@ -221,6 +379,12 @@ def fund_detail(
     if fund is None:
         raise HTTPException(status_code=404, detail="Fund not found")
     version = _version_for_fund(session, fund_id, as_of)
+    analysis_status = _analysis_status(session, version) if version else "pending"
+    analysis_run = (
+        _analysis_run_for_version(session, version)
+        if version and analysis_status == "ready"
+        else None
+    )
     aliases = session.scalars(
         select(FundAlias)
         .where(FundAlias.fund_id == fund.id)
@@ -269,6 +433,8 @@ def fund_detail(
             "quality_status": _quality_status(session, version.id)
             if version
             else "pending",
+            "analysis_status": analysis_status,
+            "analysis_run_id": analysis_run.id if analysis_run else None,
         }
     }
 
@@ -300,6 +466,7 @@ def nav_series(
     if end is not None:
         statement = statement.where(ValuationVersion.valuation_date <= end)
     rows = list(session.execute(statement))
+    versions = [version for version, _ in rows]
     records = [
         {
             "valuation_date": version.valuation_date,
@@ -310,24 +477,92 @@ def nav_series(
         for version, snapshot in rows
     ]
     result = calculate_nav_series(records)
+    metrics: dict[date, FundMetricDaily] = {}
+    if versions:
+        metric_rows = session.scalars(
+            select(FundMetricDaily)
+            .join(
+                AnalysisRun,
+                AnalysisRun.id == FundMetricDaily.source_analysis_run_id,
+            )
+            .where(
+                FundMetricDaily.fund_id == fund_id,
+                FundMetricDaily.valuation_date.in_(
+                    tuple(version.valuation_date for version in versions)
+                ),
+                AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
+            )
+            .order_by(
+                FundMetricDaily.valuation_date,
+                AnalysisRun.id.desc(),
+                FundMetricDaily.id.desc(),
+            )
+        )
+        for metric in metric_rows:
+            metrics.setdefault(metric.valuation_date, metric)
+
+    statuses = {
+        version.valuation_date: _analysis_status(session, version)
+        for version in versions
+    }
+    points: list[dict[str, object]] = []
+    sources: set[str] = set()
+    for point in result.points:
+        analysis_status = statuses.get(point.valuation_date, "pending")
+        metric = (
+            metrics.get(point.valuation_date) if analysis_status == "ready" else None
+        )
+        metric_source = "persisted" if metric is not None else "calculated_fallback"
+        sources.add(metric_source)
+        points.append(
+            {
+                "valuation_date": point.valuation_date.isoformat(),
+                "unit_nav": _decimal(point.unit_nav),
+                "cumulative_unit_nav": _decimal(point.cumulative_unit_nav),
+                "cumulative_payout": _decimal(point.cumulative_payout),
+                "adjusted_nav": _decimal(point.adjusted_nav),
+                "daily_return": _decimal(
+                    metric.daily_return if metric is not None else point.daily_return
+                ),
+                "cumulative_return": _decimal(
+                    metric.cumulative_return
+                    if metric is not None
+                    else point.cumulative_return
+                ),
+                "analysis_status": analysis_status,
+                "analysis_run_id": (
+                    metric.source_analysis_run_id if metric is not None else None
+                ),
+                "metric_source": metric_source,
+            }
+        )
+    overall_status = (
+        "stale"
+        if "stale" in statuses.values()
+        else "pending"
+        if "pending" in statuses.values() or not statuses
+        else "ready"
+    )
+    metric_source = (
+        "none"
+        if not sources
+        else "persisted"
+        if sources == {"persisted"}
+        else "calculated_fallback"
+        if sources == {"calculated_fallback"}
+        else "mixed"
+    )
     return {
         "data": {
             "methodology": result.methodology,
             "total_return": _decimal(result.total_return),
-            "points": [
-                {
-                    "valuation_date": point.valuation_date.isoformat(),
-                    "unit_nav": _decimal(point.unit_nav),
-                    "cumulative_unit_nav": _decimal(point.cumulative_unit_nav),
-                    "cumulative_payout": _decimal(point.cumulative_payout),
-                    "adjusted_nav": _decimal(point.adjusted_nav),
-                    "daily_return": _decimal(point.daily_return),
-                    "cumulative_return": _decimal(point.cumulative_return),
-                }
-                for point in result.points
-            ],
+            "points": points,
         },
-        "meta": {"coverage": {"available": len(records), "total": len(records)}},
+        "meta": {
+            "coverage": {"available": len(records), "total": len(records)},
+            "analysis_status": overall_status,
+            "metric_source": metric_source,
+        },
     }
 
 

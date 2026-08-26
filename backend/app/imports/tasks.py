@@ -10,9 +10,10 @@ from sqlalchemy import and_, event, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from app.analytics.service import AnalysisProcessResult, process_analysis_run
 from app.config import Settings
-from app.db.base import ImportBatchStatus, JobStatus
-from app.db.models import BackgroundJob, ImportBatch
+from app.db.base import AnalysisRunStatus, AuditResult, ImportBatchStatus, JobStatus
+from app.db.models import AnalysisRun, AuditLog, BackgroundJob, ImportBatch
 
 from .processor import BatchProcessResult, process_import_batch
 
@@ -74,13 +75,12 @@ def claim_next_job(
             job.finished_at = current_time
             job.locked_at = None
             job.lease_token = None
-            try:
-                batch = claim_session.get(ImportBatch, int(job.resource_id))
-            except ValueError:
-                batch = None
-            if batch is not None:
-                batch.status = ImportBatchStatus.FAILED
-                batch.ended_at = current_time
+            _mark_resource_failed(
+                claim_session,
+                job,
+                error_code="max_attempts_exceeded",
+                now=current_time,
+            )
             claim_session.commit()
             return None
 
@@ -203,8 +203,8 @@ def fail_job(
 
 def process_next_job(
     session: Session, settings: Settings
-) -> tuple[BackgroundJob, BatchProcessResult | None] | None:
-    """Claim and execute one import job, converting failures to stable states."""
+) -> tuple[BackgroundJob, BatchProcessResult | AnalysisProcessResult | None] | None:
+    """Claim and execute one database-backed job."""
 
     job = claim_next_job(session)
     if job is None:
@@ -212,10 +212,14 @@ def process_next_job(
     lease_token = job.lease_token
     resource_id: int | None = None
     try:
-        if job.job_type != "process_import_batch":
+        if job.job_type == "process_import_batch":
+            resource_id = int(job.resource_id)
+            result = process_import_batch(session, resource_id, settings)
+        elif job.job_type == "process_analysis_run":
+            resource_id = int(job.resource_id)
+            result = process_analysis_run(session, resource_id)
+        else:
             raise ValueError("unsupported_job_type")
-        resource_id = int(job.resource_id)
-        result = process_import_batch(session, resource_id, settings)
         if not finish_job(session, job, lease_token=lease_token):
             session.rollback()
             return job, None
@@ -229,16 +233,17 @@ def process_next_job(
         updated = fail_job(
             session,
             refreshed,
-            "batch_processing_failed",
+            _processing_error_code(job),
             retryable=False,
             lease_token=lease_token,
         )
-        batch = (
-            session.get(ImportBatch, resource_id) if resource_id is not None else None
-        )
-        if updated and batch is not None:
-            batch.status = ImportBatchStatus.FAILED
-            batch.ended_at = datetime.now(UTC)
+        if updated:
+            _mark_resource_failed(
+                session,
+                refreshed,
+                error_code=_processing_error_code(job),
+                now=datetime.now(UTC),
+            )
         session.commit()
         return refreshed, None
     except Exception:
@@ -249,18 +254,60 @@ def process_next_job(
         updated = fail_job(
             session,
             refreshed,
-            "batch_processing_failed",
+            _processing_error_code(job),
             retryable=True,
             lease_token=lease_token,
         )
         if updated and refreshed.status == JobStatus.FAILED:
-            batch = (
-                session.get(ImportBatch, resource_id)
-                if resource_id is not None
-                else None
+            _mark_resource_failed(
+                session,
+                refreshed,
+                error_code=_processing_error_code(job),
+                now=datetime.now(UTC),
             )
-            if batch is not None:
-                batch.status = ImportBatchStatus.FAILED
-                batch.ended_at = datetime.now(UTC)
         session.commit()
         return refreshed, None
+
+
+def _processing_error_code(job: BackgroundJob) -> str:
+    return (
+        "analysis_processing_failed"
+        if job.job_type == "process_analysis_run"
+        else "batch_processing_failed"
+    )
+
+
+def _mark_resource_failed(
+    session: Session,
+    job: BackgroundJob,
+    *,
+    error_code: str,
+    now: datetime,
+) -> None:
+    try:
+        resource_id = int(job.resource_id)
+    except ValueError:
+        return
+    if job.job_type == "process_import_batch":
+        batch = session.get(ImportBatch, resource_id)
+        if batch is not None:
+            batch.status = ImportBatchStatus.FAILED
+            batch.ended_at = now
+        return
+    if job.job_type != "process_analysis_run":
+        return
+    run = session.get(AnalysisRun, resource_id)
+    if run is None:
+        return
+    run.status = AnalysisRunStatus.FAILED
+    run.error_message = error_code
+    run.ended_at = now
+    session.add(
+        AuditLog(
+            action="analysis.failed",
+            resource_type="analysis_run",
+            resource_id=str(run.id),
+            summary={"error_code": error_code},
+            result=AuditResult.FAILURE,
+        )
+    )

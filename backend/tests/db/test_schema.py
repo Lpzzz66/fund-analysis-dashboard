@@ -229,12 +229,26 @@ def test_alembic_upgrade_creates_initial_schema(
 
     migrated_engine = create_engine(f"sqlite+pysqlite:///{database_path.as_posix()}")
     with migrated_engine.connect() as connection:
+        inspector = inspect(connection)
         table_names = set(
             connection.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).scalars()
         )
+        analysis_columns = {
+            column["name"] for column in inspector.get_columns("analysis_run")
+        }
+        analysis_foreign_keys = inspector.get_foreign_keys("analysis_run")
+        analysis_indexes = {
+            index["name"] for index in inspector.get_indexes("analysis_run")
+        }
     assert set(Base.metadata.tables).issubset(table_names)
+    assert "trigger_version_id" in analysis_columns
+    assert any(
+        foreign_key["constrained_columns"] == ["trigger_version_id"]
+        for foreign_key in analysis_foreign_keys
+    )
+    assert "ix_analysis_run_trigger_version_id" in analysis_indexes
 
 
 def test_initial_migration_downgrade_preserves_existing_data(

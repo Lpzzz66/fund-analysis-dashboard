@@ -32,6 +32,14 @@ class AnalysisRun(Base):
     __tablename__ = "analysis_run"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trigger_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "valuation_version.id",
+            name="fk_analysis_run_trigger_version_id",
+            ondelete="RESTRICT",
+        ),
+        index=True,
+    )
     trigger_reason: Mapped[str] = mapped_column(String(255), nullable=False)
     input_start_date: Mapped[date | None] = mapped_column(Date)
     input_end_date: Mapped[date | None] = mapped_column(Date)

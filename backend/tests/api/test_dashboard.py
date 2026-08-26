@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from app.db.base import FundStatus
+from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
+from app.db.models import AnalysisRun, FundMetricDaily, ValuationVersion
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .conftest import seed_published_fund
 
@@ -55,6 +58,118 @@ def test_dashboard_has_date_and_pagination_filters(
     assert response.json()["data"][0]["name"] == "千金一号"
     assert overview.status_code == 200
     assert overview.json()["data"]["total_net_assets"] == "90000.0000000000"
+
+
+def test_dashboard_reports_failed_analysis_as_stale(
+    admin_client, app_and_engine
+) -> None:
+    fund_id, version_id = seed_published_fund(app_and_engine[1])
+    with Session(app_and_engine[1]) as session:
+        run = session.scalar(
+            select(AnalysisRun).where(AnalysisRun.trigger_version_id == version_id)
+        )
+        assert run is not None
+        run.status = AnalysisRunStatus.FAILED
+        session.commit()
+
+    funds = admin_client.get("/api/v1/funds")
+    detail = admin_client.get(f"/api/v1/funds/{fund_id}")
+    overview = admin_client.get("/api/v1/dashboard/overview")
+
+    assert funds.json()["data"][0]["analysis_status"] == "stale"
+    assert detail.json()["data"]["analysis_status"] == "stale"
+    assert overview.json()["meta"]["analysis_status"] == "stale"
+
+
+def test_dashboard_prefers_latest_successful_recalculation(
+    admin_client, app_and_engine
+) -> None:
+    fund_id, version_id = seed_published_fund(app_and_engine[1])
+    with Session(app_and_engine[1]) as session:
+        original_run = session.scalar(
+            select(AnalysisRun).where(AnalysisRun.trigger_version_id == version_id)
+        )
+        assert original_run is not None
+        original_run.status = AnalysisRunStatus.SUCCEEDED
+        session.add(
+            FundMetricDaily(
+                fund_id=fund_id,
+                valuation_date=date(2026, 8, 25),
+                source_analysis_run_id=original_run.id,
+                daily_return=Decimal("0.01"),
+            )
+        )
+        historical_version = ValuationVersion(
+            fund_id=fund_id,
+            valuation_date=date(2026, 8, 24),
+            version_no=1,
+            status=ValuationStatus.PUBLISHED,
+        )
+        session.add(historical_version)
+        session.flush()
+        recalculation = AnalysisRun(
+            trigger_version_id=historical_version.id,
+            trigger_reason="historical_revision",
+            input_start_date=historical_version.valuation_date,
+            input_end_date=date(2026, 8, 25),
+            methodology_version="v1",
+            status=AnalysisRunStatus.SUCCEEDED,
+        )
+        session.add(recalculation)
+        session.flush()
+        recalculation_id = recalculation.id
+        session.add(
+            FundMetricDaily(
+                fund_id=fund_id,
+                valuation_date=date(2026, 8, 25),
+                source_analysis_run_id=recalculation.id,
+                daily_return=Decimal("0.02"),
+            )
+        )
+        session.commit()
+
+    funds = admin_client.get("/api/v1/funds")
+
+    assert funds.json()["data"][0]["daily_return"] == "0.0200000000"
+    assert funds.json()["data"][0]["analysis_run_id"] == recalculation_id
+
+
+def test_nav_series_prefers_persisted_metrics_and_reports_fallback(
+    admin_client, app_and_engine
+) -> None:
+    fund_id, version_id = seed_published_fund(app_and_engine[1])
+
+    pending = admin_client.get(f"/api/v1/funds/{fund_id}/nav-series")
+    assert pending.json()["meta"]["analysis_status"] == "pending"
+    assert pending.json()["data"]["points"][0]["metric_source"] == (
+        "calculated_fallback"
+    )
+
+    with Session(app_and_engine[1]) as session:
+        run = session.scalar(
+            select(AnalysisRun).where(AnalysisRun.trigger_version_id == version_id)
+        )
+        assert run is not None
+        run.status = AnalysisRunStatus.SUCCEEDED
+        session.add(
+            FundMetricDaily(
+                fund_id=fund_id,
+                valuation_date=date(2026, 8, 25),
+                source_analysis_run_id=run.id,
+                daily_return=Decimal("0.123"),
+                cumulative_return=Decimal("0.456"),
+            )
+        )
+        session.commit()
+
+    ready = admin_client.get(f"/api/v1/funds/{fund_id}/nav-series")
+    point = ready.json()["data"]["points"][0]
+
+    assert ready.json()["meta"]["analysis_status"] == "ready"
+    assert ready.json()["meta"]["metric_source"] == "persisted"
+    assert point["daily_return"] == "0.1230000000"
+    assert point["cumulative_return"] == "0.4560000000"
+    assert point["metric_source"] == "persisted"
 
 
 def test_fund_list_reports_total_and_empty_out_of_range_page(

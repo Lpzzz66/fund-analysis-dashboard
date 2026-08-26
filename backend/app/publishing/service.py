@@ -22,6 +22,7 @@ from app.db.models import (
     AccountSubjectDaily,
     AnalysisRun,
     AuditLog,
+    BackgroundJob,
     FieldProvenance,
     Fund,
     FundDailySnapshot,
@@ -520,6 +521,7 @@ class PublishingService:
         self, version: ValuationVersion, trigger_reason: str
     ) -> AnalysisRun:
         analysis_run = AnalysisRun(
+            trigger_version_id=version.id,
             trigger_reason=trigger_reason,
             input_start_date=version.valuation_date,
             input_end_date=None,
@@ -528,6 +530,13 @@ class PublishingService:
             status=AnalysisRunStatus.QUEUED,
         )
         self.session.add(analysis_run)
+        self.session.flush()
+        self.session.add(
+            BackgroundJob(
+                job_type="process_analysis_run",
+                resource_id=str(analysis_run.id),
+            )
+        )
         self.session.flush()
         return analysis_run
 
