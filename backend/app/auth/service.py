@@ -266,7 +266,14 @@ class AuthService:
         )
         return user
 
-    def set_user_status(self, actor: User, user_id: int, status: UserStatus) -> User:
+    def set_user_status(
+        self,
+        actor: User,
+        user_id: int,
+        status: UserStatus,
+        *,
+        reason: str | None = None,
+    ) -> User:
         user = self._load_user_by_id(user_id)
         if user is None:
             raise LookupError(user_id)
@@ -287,11 +294,19 @@ class AuthService:
             resource_type="user",
             resource_id=str(user.id),
             actor_user_id=actor.id,
+            reason=reason,
         )
         self.session.flush()
         return user
 
-    def reset_password(self, actor: User, user_id: int, password: str) -> User:
+    def reset_password(
+        self,
+        actor: User,
+        user_id: int,
+        password: str,
+        *,
+        reason: str | None = None,
+    ) -> User:
         user = self.session.get(User, user_id)
         if user is None:
             raise LookupError(user_id)
@@ -304,11 +319,19 @@ class AuthService:
             resource_type="user",
             resource_id=str(user.id),
             actor_user_id=actor.id,
+            reason=reason,
         )
         self.session.flush()
         return user
 
-    def change_role(self, actor: User, user_id: int, role: UserRole) -> User:
+    def change_role(
+        self,
+        actor: User,
+        user_id: int,
+        role: UserRole,
+        *,
+        reason: str | None = None,
+    ) -> User:
         user = self._load_user_by_id(user_id)
         if user is None:
             raise LookupError(user_id)
@@ -328,11 +351,18 @@ class AuthService:
             resource_id=str(user.id),
             actor_user_id=actor.id,
             summary={"role": role.value},
+            reason=reason,
         )
         self.session.flush()
         return user
 
-    def revoke_sessions(self, actor: User, user_id: int) -> User:
+    def revoke_sessions(
+        self,
+        actor: User,
+        user_id: int,
+        *,
+        reason: str | None = None,
+    ) -> User:
         user = self.session.get(User, user_id)
         if user is None:
             raise LookupError(user_id)
@@ -342,6 +372,7 @@ class AuthService:
             resource_type="user",
             resource_id=str(user.id),
             actor_user_id=actor.id,
+            reason=reason,
         )
         self.session.flush()
         return user

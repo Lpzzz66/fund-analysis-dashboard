@@ -54,10 +54,20 @@ class CreateUserRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=8, max_length=256)
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class ChangeRoleRequest(BaseModel):
     role: UserRole
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class StatusChangeRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class RevokeSessionsRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 def _user_data(user: User) -> dict[str, object]:
@@ -247,9 +257,13 @@ def _set_status(
     new_status: UserStatus,
     context: AuthContext,
     session: Session,
+    *,
+    reason: str | None = None,
 ) -> dict[str, object]:
     try:
-        user = AuthService(session).set_user_status(context.user, user_id, new_status)
+        user = AuthService(session).set_user_status(
+            context.user, user_id, new_status, reason=reason
+        )
         session.commit()
     except AuthService.AccountProtection as exc:
         session.rollback()
@@ -262,14 +276,20 @@ def _set_status(
 
 @user_router.post("/{user_id}/disable")
 def disable_user(
-    user_id: int, context: AdminContext, session: DatabaseSession
+    user_id: int,
+    context: AdminContext,
+    session: DatabaseSession,
+    payload: StatusChangeRequest | None = None,
 ) -> dict[str, object]:
-    return _set_status(user_id, UserStatus.DISABLED, context, session)
+    reason = payload.reason if payload else None
+    return _set_status(user_id, UserStatus.DISABLED, context, session, reason=reason)
 
 
 @user_router.post("/{user_id}/enable")
 def enable_user(
-    user_id: int, context: AdminContext, session: DatabaseSession
+    user_id: int,
+    context: AdminContext,
+    session: DatabaseSession,
 ) -> dict[str, object]:
     return _set_status(user_id, UserStatus.ACTIVE, context, session)
 
@@ -283,7 +303,7 @@ def reset_password(
 ) -> dict[str, object]:
     try:
         user = AuthService(session).reset_password(
-            context.user, user_id, payload.password
+            context.user, user_id, payload.password, reason=payload.reason
         )
         session.commit()
     except LookupError as exc:
@@ -300,7 +320,9 @@ def change_role(
     session: DatabaseSession,
 ) -> dict[str, object]:
     try:
-        user = AuthService(session).change_role(context.user, user_id, payload.role)
+        user = AuthService(session).change_role(
+            context.user, user_id, payload.role, reason=payload.reason
+        )
         session.commit()
     except AuthService.AccountProtection as exc:
         session.rollback()
@@ -313,10 +335,16 @@ def change_role(
 
 @user_router.post("/{user_id}/revoke-sessions")
 def revoke_sessions(
-    user_id: int, context: AdminContext, session: DatabaseSession
+    user_id: int,
+    context: AdminContext,
+    session: DatabaseSession,
+    payload: RevokeSessionsRequest | None = None,
 ) -> dict[str, object]:
     try:
-        user = AuthService(session).revoke_sessions(context.user, user_id)
+        reason = payload.reason if payload else None
+        user = AuthService(session).revoke_sessions(
+            context.user, user_id, reason=reason
+        )
         session.commit()
     except LookupError as exc:
         session.rollback()

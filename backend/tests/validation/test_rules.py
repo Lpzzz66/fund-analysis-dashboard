@@ -83,6 +83,56 @@ def test_position_quantity_times_price_is_warning_when_different() -> None:
     assert result.difference == Decimal(1)
 
 
+def test_position_relative_tolerance_allows_large_drift() -> None:
+    # A 100万元 position with 0.005 yuan total drift is well within 0.01%
+    # relative tolerance — should pass, not flag as WARNING.
+    position = ParsedPosition(
+        security_code="600000",
+        security_name="大额持仓",
+        quantity=Decimal(100000),
+        unit_cost=None,
+        cost=None,
+        market_price=Decimal("10.00"),
+        market_value=Decimal("1000000.005"),
+        nav_weight=None,
+        valuation_gain=None,
+        suspension_info=None,
+        source_subject_code="600000",
+        market=None,
+        account=None,
+        source_row=1,
+    )
+
+    result = check_position_market_value(position)
+
+    assert result.level == ValidationLevel.INFO
+
+
+def test_position_relative_tolerance_still_catches_real_drift() -> None:
+    # A 1万元 position with 100元 drift (1%) is well above the relative
+    # tolerance and must still warn.
+    position = ParsedPosition(
+        security_code="600001",
+        security_name="中等持仓",
+        quantity=Decimal(100),
+        unit_cost=None,
+        cost=None,
+        market_price=Decimal("100"),
+        market_value=Decimal("10100"),
+        nav_weight=None,
+        valuation_gain=None,
+        suspension_info=None,
+        source_subject_code="600001",
+        market=None,
+        account=None,
+        source_row=1,
+    )
+
+    result = check_position_market_value(position)
+
+    assert result.level == ValidationLevel.WARNING
+
+
 def test_validate_values_is_publishable_with_warnings_but_not_critical() -> None:
     warning_report = validate_values(
         total_assets=Decimal(100),
@@ -244,7 +294,12 @@ def test_validation_service_accepts_parser_import_state(session: Session) -> Non
 
     report = ValidationService(session).validate_version(version.id)
 
-    assert report.status == ValuationStatus.PENDING_REVIEW
+    # Missing snapshot is informational — version should remain publishable so
+    # reconciliation can later populate the snapshot without operator action.
+    assert report.status == ValuationStatus.PUBLISHABLE
+    assert any(
+        f.rule_code == "valuation_snapshot_missing" for f in report.findings
+    )
 
 
 def test_postgresql_validation_load_locks_version_row() -> None:
