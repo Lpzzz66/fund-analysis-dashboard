@@ -222,6 +222,8 @@ def fund_detail(
             "product_code": fund.product_code,
             "strategy": fund.strategy,
             "manager": fund.manager,
+            "establishment_date": fund.establishment_date,
+            "notes": fund.notes,
             "status": fund.status,
             "current_version_id": version.id if version else None,
             "valuation_date": version.valuation_date.isoformat() if version else None,
