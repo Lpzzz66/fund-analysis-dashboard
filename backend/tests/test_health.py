@@ -1,6 +1,17 @@
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+
 import pytest
-from app.config import get_settings
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.auth.dependencies import get_db
+from app.config import get_settings
+from app.db.base import Base
+from app.db.models import AuditLog, BackgroundJob
+from app.db.session import create_engine
+from app.system.health import operational_summary, record_worker_heartbeat
 
 
 def _create_app():
@@ -78,3 +89,87 @@ def test_upload_limit_cannot_be_raised_above_20_mib(
 
     with pytest.raises(ValueError, match="cannot exceed 20 MiB"):
         get_settings()
+
+
+def test_operational_summary_contains_heartbeat_queue_backup_and_disk_usage(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    settings = replace(
+        get_settings(),
+        source_storage_dir=str(tmp_path),
+        database_backup_dir=str(tmp_path),
+        upload_temp_dir=str(tmp_path),
+    )
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+    try:
+        with Session(engine) as session:
+            record_worker_heartbeat(session, worker_id="worker-test", now=now)
+            session.add(BackgroundJob(job_type="process_import_batch", resource_id="1"))
+            session.add(
+                AuditLog(
+                    action="system.database_backup",
+                    resource_type="database",
+                    summary={
+                        "status": "succeeded",
+                        "backup_name": "database-test.dump",
+                        "size_bytes": 12,
+                        "command": ["hidden-command"],
+                    },
+                    result="success",
+                )
+            )
+            session.commit()
+
+            summary = operational_summary(session, settings, now=now)
+
+        assert summary["worker"]["status"] == "healthy"
+        assert summary["worker"]["worker_id"] == "worker-test"
+        assert summary["queue"]["backlog"] == 1
+        assert summary["backup"]["status"] == "succeeded"
+        assert summary["backup"]["backup_name"] == "database-test.dump"
+        assert summary["disk"]["source_storage"]["total_bytes"] > 0
+        assert "hidden-command" not in str(summary)
+        assert "command" not in str(summary)
+    finally:
+        engine.dispose()
+
+
+def test_operations_endpoint_requires_operator_and_returns_summary(
+    tmp_path: Path,
+) -> None:
+    from app.main import create_app
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    app = create_app()
+    app.state.settings = replace(
+        app.state.settings,
+        source_storage_dir=str(tmp_path),
+        database_backup_dir=str(tmp_path),
+        upload_temp_dir=str(tmp_path),
+    )
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            assert (
+                client.post(
+                    "/api/v1/auth/initialize",
+                    json={"username": "admin", "password": "correct horse"},
+                ).status_code
+                == 201
+            )
+            response = client.get("/api/v1/system/operations")
+            assert response.status_code == 200
+            assert "database" in response.json()["data"]
+            assert "token" not in response.text.casefold()
+            assert "password" not in response.text.casefold()
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from collections.abc import Callable
 
@@ -11,6 +12,23 @@ from sqlalchemy.orm import Session
 from .config import Settings, get_settings
 from .db.session import create_engine
 from .imports.tasks import process_next_job
+from .system.health import record_worker_heartbeat
+
+
+def _worker_id() -> str:
+    return os.getenv("WORKER_ID", "worker-default")
+
+
+def _record_heartbeat_if_supported(session: Session, worker_id: str) -> None:
+    """Keep heartbeat persistence best effort so it cannot stop job processing."""
+
+    try:
+        record_worker_heartbeat(session, worker_id=worker_id)
+        session.commit()
+    except Exception:  # noqa: BLE001 - health telemetry must not stop the worker
+        rollback = getattr(session, "rollback", None)
+        if callable(rollback):
+            rollback()
 
 
 def run_worker(
@@ -29,10 +47,12 @@ def run_worker(
     runtime = settings or get_settings()
     engine = create_engine(runtime.database_url)
     completed = 0
+    worker_id = _worker_id()
     try:
         while max_jobs is None or completed < max_jobs:
             with Session(engine) as session:
                 result = process_next_job(session, runtime)
+                _record_heartbeat_if_supported(session, worker_id)
             if result is None:
                 if max_jobs is not None:
                     break

@@ -15,6 +15,7 @@ from app.auth.dependencies import AuthContext, get_db, require_roles
 from app.auth.service import AuthService
 from app.db.base import AuditResult, UserRole
 from app.db.models import AuditLog
+from app.system.health import operational_summary
 from app.system.settings import (
     RUNTIME_NOTE,
     SystemSettingsError,
@@ -27,6 +28,9 @@ router = APIRouter(prefix="/api/v1", tags=["system"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 SystemAdmin = Annotated[AuthContext, Depends(require_roles(UserRole.ADMIN))]
 AuditReader = Annotated[
+    AuthContext, Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR))
+]
+SystemOperator = Annotated[
     AuthContext, Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR))
 ]
 
@@ -107,6 +111,17 @@ def system_health(
             "service": request.app.state.settings.service_name,
         }
     }
+
+
+@router.get("/system/operations")
+def system_operations(
+    _: SystemOperator,
+    request: Request,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    """Return the authenticated maintenance and worker operations summary."""
+
+    return {"data": operational_summary(session, request.app.state.settings)}
 
 
 _SENSITIVE_KEY_PARTS = (

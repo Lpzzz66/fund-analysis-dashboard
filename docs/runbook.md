@@ -173,6 +173,39 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml logs --tail=200
 
 邮件同步仍由已有 API 邮件接口按权限触发，IMAP（邮件接收协议）配置只从环境或受控授权码文件读取。首次配置后由管理员执行邮箱连接测试，再执行同步；邮箱同步只接收附件并创建导入数据，Excel 解析仍由 worker 处理。
 
+### 6.1 维护命令与调度
+
+维护入口是 one-shot CLI（一次性命令行入口），每次只运行一个有界操作，不引入第二套 worker（任务进程）、Redis（缓存/队列）或 Celery（任务框架）。命令都应使用与 API（接口）相同的生产环境变量和数据库迁移版本：
+
+```bash
+cd /opt/fund-dashboard
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps api python -m app.maintenance_cli mail-sync
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps api python -m app.maintenance_cli database-backup
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps api python -m app.maintenance_cli source-retention
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps api python -m app.maintenance_cli source-retention --apply
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
+  run --rm --no-deps api python -m app.maintenance_cli job-summary
+```
+
+`source-retention`（源文件清理）默认是 dry-run（预演），只有明确指定 `--apply`（执行）才会删除通过现有安全检查的原始对象。命令退出码为 0 表示成功，退出码为 1 表示该次维护失败；失败原因使用稳定 error code（错误编号），不会把密码、token（令牌）或数据库连接串写入输出。
+
+默认调度建议如下：mail-sync（邮件同步）每 5 分钟、database-backup（数据库备份）每天 `02:30`、source-retention（源文件清理）每天 `03:30` 且位于备份之后、health check（健康检查）每 1 分钟。宿主机 cron（定时任务）示例：
+
+```cron
+*/5 * * * * cd /opt/fund-dashboard && docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps api python -m app.maintenance_cli mail-sync >> /var/log/fund-dashboard-maintenance.log 2>&1
+30 2 * * * cd /opt/fund-dashboard && docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps api python -m app.maintenance_cli database-backup >> /var/log/fund-dashboard-maintenance.log 2>&1
+30 3 * * * cd /opt/fund-dashboard && docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps api python -m app.maintenance_cli source-retention --apply >> /var/log/fund-dashboard-maintenance.log 2>&1
+* * * * * curl --fail --silent --show-error https://dashboard.example.com/health/live >/dev/null || logger -t fund-dashboard-health health-check-failed
+```
+
+调度间隔和监控阈值可以通过 `MAINTENANCE_MAIL_INTERVAL_MINUTES`（邮件间隔）、`MAINTENANCE_BACKUP_INTERVAL_HOURS`（备份间隔）、`MAINTENANCE_RETENTION_INTERVAL_HOURS`（清理间隔）、`MAINTENANCE_HEALTH_INTERVAL_MINUTES`（健康检查间隔）、`WORKER_HEARTBEAT_STALE_SECONDS`（worker 心跳过期秒数）、`MAINTENANCE_DISK_WARNING_PERCENT`（磁盘预警使用率）和 `MAINTENANCE_DISK_CRITICAL_PERCENT`（磁盘严重使用率）覆盖。使用 Compose（容器编排）执行时，需把这些变量显式传入维护容器，例如 `docker compose run -e MAINTENANCE_MAIL_INTERVAL_MINUTES=10 ...`；不要把秘密写进命令行或日志。
+
+登录后的管理员或 operator（操作员）可以读取 `GET /api/v1/system/operations`（运维摘要接口）。摘要包含 worker heartbeat（worker 心跳）、队列积压、最近维护成功/失败、最近数据库备份状态和各运行目录所在磁盘的容量/使用率；不返回租约 token（令牌）、邮件授权码、数据库地址、原始服务器路径或备份命令。worker 每轮领取/检查任务后更新心跳，连续超过过期阈值未更新时显示 stale（过期）。
+
 ## 7. 每日备份、清理和磁盘策略
 
 数据库每天至少做一次逻辑备份，建议 `02:30`；备份文件滚动保留 30 天。原始 Excel 默认保留 365 天，建议每天 `03:30` 先预演，再在维护窗口执行正式清理。具体命令、审计要求、备份可读性检查和当前源文件备份限制见 `deploy/backup/README.md`。
@@ -282,4 +315,4 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml up -d api worke
 - 当前没有异地备份服务器或对象存储保护，不能承诺单机损坏后的完整恢复。
 - 当前没有前端容器；Caddy 的前端兜底是 404，不代表前端已经部署。
 - 当前没有会话签名密钥；会话使用数据库令牌摘要，未来改造必须单独设计密钥轮换。
-- 当前清理服务没有命令行入口，运维通过容器内 Python 调用已有服务；若后续调度复杂度上升，应优先增加一个受测的运维 CLI，再考虑其他组件，不直接引入消息队列。
+- 当前没有集中式调度器；生产调度由宿主机 cron（定时任务）调用受测的运维 CLI（命令行入口），不直接引入消息队列。
