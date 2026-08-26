@@ -131,7 +131,10 @@ services:
     logging: *default-logging
 
   caddy:
-    image: caddy:2.8-alpine
+    build:
+      context: ..
+      dockerfile: deploy/Caddy.Dockerfile
+    image: fund-dashboard-web:${APP_IMAGE_TAG:-local}
     restart: unless-stopped
     stop_grace_period: 15s
     environment:

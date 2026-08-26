@@ -1,6 +1,6 @@
 # 生产运行手册
 
-本文档面向系统管理员，覆盖单台阿里云 Debian 12.10（Linux 服务器系统）上基金估值分析看板的首次部署、日常运行、备份恢复和升级回滚。当前版本只部署后端 API、独立 worker（任务进程）、PostgreSQL（关系型数据库）和 Caddy（反向代理）；前端尚未实现，不会在部署中伪造前端服务。
+本文档面向系统管理员，覆盖单台阿里云 Debian 12.10（Linux 服务器系统）上基金估值分析看板的首次部署、日常运行、备份恢复和升级回滚。当前版本部署后端 API（接口服务）、独立 worker（任务进程）、PostgreSQL（关系型数据库）和内置已编译前端静态文件的 Caddy（网页服务器）。Node.js（前端运行环境）只用于镜像构建，不在生产环境常驻。
 
 ## 1. 运行边界
 
@@ -10,6 +10,7 @@
 公网 80/443
       |
     Caddy  ---- ACME/Let's Encrypt（自动证书服务）
+      +-- 前端静态文件和 SPA（单页应用）路由回退
       |
   内部网络 backend
       +-- API（只接入、查询、权限和邮件同步，不解析 Excel）
@@ -17,9 +18,9 @@
       +-- PostgreSQL（不暴露宿主机端口）
 ```
 
-Compose（容器编排）只使用四个服务，不引入 Redis（缓存/队列）、Celery（任务框架）、对象存储或 Kubernetes（集群编排）。Caddy 的公网网络与 API/数据库所在的内部网络分开；PostgreSQL 只加入内部网络。
+Compose（容器编排）只使用四个服务，不引入 Redis（缓存/队列）、Celery（任务框架）、对象存储、独立前端运行服务或 Kubernetes（集群编排）。Caddy 的公网网络与 API/数据库所在的内部网络分开；PostgreSQL 只加入内部网络。
 
-当前 Caddy 只代理 `/api/*` 和 `/health/*`。根路径会返回“前端未部署”的 404；前端实现后，应新增独立前端服务，再把 Caddy 的兜底 handler（处理器）改为该服务的 `reverse_proxy`（反向代理），不把前端静态文件混入 API 镜像。
+Caddy 将 `/api/*` 和 `/health/*` 原样反向代理到 API，其余请求从镜像中的 `/srv` 提供静态文件；前端路由在找不到物理文件时回退到 `index.html`。前端构建产物不进入 API 镜像，生产容器中也没有 Node.js 进程。
 
 ## 2. 前置条件
 
@@ -89,10 +90,10 @@ getent hosts dashboard.example.com
 ```bash
 cd /opt/fund-dashboard
 docker compose --env-file deploy/.env -f deploy/compose.prod.yml config
-docker compose --env-file deploy/.env -f deploy/compose.prod.yml build --pull api
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml build --pull api caddy
 ```
 
-`worker` 使用相同的 API 镜像，因此不需要第二次构建。构建失败时不要启动旧配置，先修复镜像或依赖问题。
+`worker` 使用相同的 API 镜像，因此不需要第二次构建。Caddy 镜像在独立构建阶段执行 `npm ci` 和 `npm run build`，最终镜像只从该阶段复制 `frontend/dist`（前端静态构建目录），不包含 Node.js 或前端源码。构建失败时不要启动旧配置，先修复镜像或依赖问题。
 
 ### 4.3 启动数据库并执行迁移
 
@@ -131,7 +132,14 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml logs --tail=100
 curl --fail --silent --show-error https://dashboard.example.com/health/live
 ```
 
-响应只应包含稳定的 `status` 和 `service` 字段，不包含数据库地址、服务器路径或秘密。首次管理员初始化只允许成功一次。不要把真实密码直接写到 shell 历史，使用受控终端变量或交互式 HTTP 客户端调用 `POST /api/v1/auth/initialize`：
+再验证前端首页与深层路由均由同一 Caddy 实例提供：
+
+```bash
+curl --fail --silent --show-error --head https://dashboard.example.com/
+curl --fail --silent --show-error --head https://dashboard.example.com/login
+```
+
+健康响应只应包含稳定的 `status` 和 `service` 字段，不包含数据库地址、服务器路径或秘密。两个前端请求都应返回成功状态和 HTML（网页文件）；深层路由成功表示 SPA 回退有效。首次管理员初始化只允许成功一次。不要把真实密码直接写到 shell 历史，使用受控终端变量或交互式 HTTP 客户端调用 `POST /api/v1/auth/initialize`：
 
 ```bash
 read -r -s ADMIN_PASSWORD
@@ -207,6 +215,27 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
 调度间隔和监控阈值可以通过 `MAINTENANCE_MAIL_INTERVAL_MINUTES`（邮件间隔）、`MAINTENANCE_BACKUP_INTERVAL_HOURS`（备份间隔）、`MAINTENANCE_RETENTION_INTERVAL_HOURS`（清理间隔）、`MAINTENANCE_HEALTH_INTERVAL_MINUTES`（健康检查间隔）、`WORKER_HEARTBEAT_STALE_SECONDS`（worker 心跳过期秒数）、`MAINTENANCE_DISK_WARNING_PERCENT`（磁盘预警使用率）和 `MAINTENANCE_DISK_CRITICAL_PERCENT`（磁盘严重使用率）覆盖。使用 Compose（容器编排）执行时，需把这些变量显式传入维护容器，例如 `docker compose run -e MAINTENANCE_MAIL_INTERVAL_MINUTES=10 ...`；不要把秘密写进命令行或日志。
 
 登录后的管理员或 operator（操作员）可以读取 `GET /api/v1/system/operations`（运维摘要接口）。摘要包含 worker heartbeat（worker 心跳）、队列积压、最近维护成功/失败、最近数据库备份状态和各运行目录所在磁盘的容量/使用率；不返回租约 token（令牌）、邮件授权码、数据库地址、原始服务器路径或备份命令。worker 每轮领取/检查任务后更新心跳，连续超过过期阈值未更新时显示 stale（过期）。
+
+## 6.2 本地开发双进程
+
+开发环境不额外增加前端容器。`compose.dev.yml` 只启动支持热重载的 API；前端使用本机 Node.js 独立启动。这样 Vite（前端开发服务器）可以直接通过现有代理设置访问 `127.0.0.1:8000`，避免在容器网络和宿主机网络之间维护第二套地址配置。
+
+先启动后端：
+
+```powershell
+docker compose -f deploy/compose.dev.yml up api
+```
+
+再打开另一个 PowerShell（命令行终端）窗口启动前端：
+
+```powershell
+Set-Location F:\AgentWorks\基金分析看板\frontend
+$env:npm_config_cache = 'F:\AgentTools\npm-cache'
+npm ci --no-audit --no-fund
+npm run dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`。前端开发服务器将 `/api` 和 `/health` 请求代理到本机 8000 端口；开发时不要把生产密码、邮箱授权码或 `.env` 文件放入前端目录。结束开发时分别停止两个前台进程。
 
 ## 7. 每日备份、清理和磁盘策略
 
@@ -294,7 +323,7 @@ try:
 finally:
     engine.dispose()
 PY
-docker compose --env-file deploy/.env -f deploy/compose.prod.yml build --pull api
+docker compose --env-file deploy/.env -f deploy/compose.prod.yml build --pull api caddy
 docker compose --env-file deploy/.env -f deploy/compose.prod.yml \
   run --rm --no-deps api python -m alembic -c /app/backend/alembic.ini upgrade head
 docker compose --env-file deploy/.env -f deploy/compose.prod.yml up -d api worker caddy
@@ -317,7 +346,7 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml up -d api worke
 ## 11. 明确未提供的能力
 
 - 当前没有异地备份服务器或对象存储保护，不能承诺单机损坏后的完整恢复。
-- 当前没有前端容器；Caddy 的前端兜底是 404，不代表前端已经部署。
+- 当前没有独立前端运行容器；这是有意设计。编译后的前端静态文件由 Caddy 镜像直接提供，生产环境不运行 Node.js。
 - 当前没有会话签名密钥；会话使用数据库令牌摘要，未来改造必须单独设计密钥轮换。
 - 当前没有集中式调度器；生产调度由宿主机 cron（定时任务）调用受测的运维 CLI（命令行入口），不直接引入消息队列。
 
