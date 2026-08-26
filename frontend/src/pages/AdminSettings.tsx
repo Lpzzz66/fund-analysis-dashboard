@@ -1,75 +1,15 @@
 import { useEffect, useState } from "react";
-import { Card, Form, InputNumber, Button, Select, Descriptions, Tag, Space } from "antd";
-import * as api from "@/mock/api";
-import { PageHeader, StatusRibbon, useToast } from "@/components";
+import { Alert, Button, Card, Descriptions, Form, InputNumber, Select, Space, Tag } from "antd";
+import * as systemApi from "@/api/system";
+import type { SystemSettings } from "@/api/types";
+import { PageHeader, useToast } from "@/components";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/utils/constants";
 
 export default function AdminSettings() {
-  const toast = useToast();
-  const [settings, setSettings] = useState<Record<string, { value: number | string; source: string }>>({});
-  const [note, setNote] = useState("");
-  const [form] = Form.useForm();
-
-  useEffect(() => {
-    (async () => {
-      const res = await api.systemSettings();
-      setSettings(res.data);
-      setNote(res.meta.runtime_note);
-      form.setFieldsValue(
-        Object.fromEntries(Object.entries(res.data).map(([k, v]) => [k, v.value])),
-      );
-    })();
-  }, []);
-
-  async function save() {
-    const v = await form.validateFields();
-    await api.updateSystemSettings(v);
-    toast.success("系统设置已更新，已写入审计");
-    const res = await api.systemSettings();
-    setSettings(res.data);
-  }
-
-  const numericKeys = Object.keys(SETTING_DEFINITIONS).filter((k) => k !== "timezone") as SettingKey[];
-
-  return (
-    <div className="fd-page">
-      <PageHeader title="系统设置" desc="管理员维护原始文件保留、任务并发、数据迟到容忍等白名单设置" extra={<Button type="primary" onClick={save}>保存设置</Button>} />
-      <StatusRibbon asOf="—" version="—" coverage={{ available: 0, total: 0 }} quality="valid" />
-
-      <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 12 }}>
-        <Card title={<span className="fd-section-title">设置项</span>}>
-          <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
-            {numericKeys.map((k) => {
-              const def = SETTING_DEFINITIONS[k];
-              return (
-                <Form.Item key={k} label={def.label} name={k} rules={[{ required: true }]}>
-                  <InputNumber min={"min" in def ? def.min : 0} max={"max" in def ? def.max : 9999} style={{ width: 200 }} />
-                </Form.Item>
-              );
-            })}
-            <Form.Item label={SETTING_DEFINITIONS.timezone.label} name="timezone" rules={[{ required: true }]}>
-              <Select showSearch options={[{ value: "Asia/Shanghai", label: "Asia/Shanghai (UTC+8)" }, { value: "UTC", label: "UTC" }, { value: "America/New_York", label: "America/New_York" }]} />
-            </Form.Item>
-          </Form>
-        </Card>
-
-        <Card title={<span className="fd-section-title">来源标识</span>} size="small">
-          <Descriptions column={1} size="small">
-            {Object.entries(settings).map(([k, v]) => (
-              <Descriptions.Item key={k} label={SETTING_DEFINITIONS[k as SettingKey]?.label ?? k}>
-                <Space>
-                  <Tag>{String(v.value)}</Tag>
-                  <Tag color={v.source === "database" ? "success" : v.source === "environment" ? "blue" : "default"}>{v.source}</Tag>
-                </Space>
-              </Descriptions.Item>
-            ))}
-          </Descriptions>
-        </Card>
-
-        <Card size="small">
-          <div className="fd-caption">{note}</div>
-        </Card>
-      </Space>
-    </div>
-  );
+  const toast = useToast(); const [settings, setSettings] = useState<SystemSettings>({}); const [note, setNote] = useState(""); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null); const [form] = Form.useForm();
+  async function load() { setLoading(true); setError(null); try { const result = await systemApi.getSettings(); setSettings(result.data); setNote(String(result.meta?.runtime_note ?? "")); form.setFieldsValue(Object.fromEntries(Object.entries(result.data).map(([key, value]) => [key, value.value]))); } catch { setError("系统设置加载失败，请刷新重试"); } finally { setLoading(false); } }
+  useEffect(() => { void load(); }, []);
+  async function save() { try { const values = await form.validateFields(); setSaving(true); await systemApi.updateSettings(values); toast.success("系统设置已更新"); await load(); } catch { setError("系统设置保存失败，请检查取值范围"); } finally { setSaving(false); } }
+  const numericKeys = Object.keys(SETTING_DEFINITIONS).filter((key) => key !== "timezone") as SettingKey[];
+  return <div className="fd-page"><PageHeader title="系统设置" desc="管理员维护原始文件保留、任务并发、数据迟到容忍和邮件同步设置" extra={<Button type="primary" loading={saving} onClick={() => void save()}>保存设置</Button>} />{error && <Alert type="error" showIcon message={error} />}<Space direction="vertical" size={12} style={{ width: "100%", marginTop: 12 }}><Card loading={loading}><Form form={form} layout="vertical" style={{ maxWidth: 560 }}>{numericKeys.map((key) => { const definition = SETTING_DEFINITIONS[key]; return <Form.Item key={key} label={definition.label} name={key} rules={[{ required: true }]}><InputNumber min={"min" in definition ? definition.min : 0} max={"max" in definition ? definition.max : 9999} style={{ width: 220 }} /></Form.Item>; })}<Form.Item label={SETTING_DEFINITIONS.timezone.label} name="timezone" rules={[{ required: true }]}><Select showSearch options={[{ value: "Asia/Shanghai", label: "Asia/Shanghai（UTC+8）" }, { value: "UTC", label: "UTC" }, { value: "America/New_York", label: "America/New_York" }]} /></Form.Item><Form.Item label="自动邮件同步" name="mail_sync_enabled"><Select options={[{ value: true, label: "启用" }, { value: false, label: "暂停" }]} /></Form.Item></Form></Card><Card title="当前值与来源"><Descriptions column={1} size="small">{Object.entries(settings).map(([key, value]) => <Descriptions.Item key={key} label={SETTING_DEFINITIONS[key as SettingKey]?.label ?? key}><Space><Tag>{String(value.value)}</Tag><Tag>{value.source}</Tag></Space></Descriptions.Item>)}</Descriptions></Card>{note && <Card size="small"><div className="fd-caption">{note}</div></Card>}</Space></div>;
 }

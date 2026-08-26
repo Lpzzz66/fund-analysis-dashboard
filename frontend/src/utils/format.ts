@@ -72,38 +72,3 @@ export function returnColor(value: string | null | undefined): string {
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
-
-/** Build a CSV blob and trigger download (simulates export of current view). */
-export function exportCsv(
-  rows: Record<string, unknown>[],
-  filename: string,
-  asOf?: string,
-): void {
-  if (rows.length === 0) return;
-  const headers = Object.keys(rows[0]);
-  const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [
-    headers.join(","),
-    ...rows.map((r) => headers.map((h) => esc(r[h])).join(",")),
-  ];
-  const note = `# 导出时间: ${new Date().toISOString()}\n# 数据截至: ${asOf ?? "—"}\n`;
-  const blob = new Blob(["\ufeff" + note + lines.join("\n")], {
-    type: "text/csv;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-/** Sleep helper for mock async latency. */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}

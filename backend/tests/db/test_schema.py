@@ -2,12 +2,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
-from sqlalchemy import Float, Numeric, inspect, select, text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
 from alembic import command
+from alembic.config import Config
 from app.db.base import Base
 from app.db.models import (
     AccountSubjectDaily,
@@ -17,6 +13,9 @@ from app.db.models import (
     ValuationVersion,
 )
 from app.db.session import create_engine
+from sqlalchemy import Float, Numeric, inspect, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()

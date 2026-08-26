@@ -206,6 +206,7 @@ def get_batch(
                     "id": link.source_file.id,
                     "original_filename": link.source_file.original_filename,
                     "file_hash": link.source_file.file_hash,
+                    "file_size": link.source_file.file_size,
                     "duplicate": link.duplicate,
                 }
                 for link in links

@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
-
 from app.parser import ValuationParser
+from openpyxl import Workbook
 
 KNOWN_PRODUCTS = {
     "千金一号": ["千金一号"],

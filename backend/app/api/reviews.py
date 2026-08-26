@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
@@ -48,36 +48,63 @@ def _error(exc: PublishingServiceError) -> HTTPException:
 def list_reviews(
     _: ReviewOperator,
     session: DatabaseSession,
+    version_status: ValuationStatus = Query(  # noqa: B008
+        default=ValuationStatus.PENDING_REVIEW, alias="status"
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, object]:
-    versions = session.scalars(
-        select(ValuationVersion)
+    base = (
+        select(ValuationVersion, Fund.standard_name)
         .join(Fund, Fund.id == ValuationVersion.fund_id)
-        .where(ValuationVersion.status == ValuationStatus.PENDING_REVIEW)
+        .where(ValuationVersion.status == version_status)
         .order_by(ValuationVersion.valuation_date, ValuationVersion.id)
-    ).all()
-    data = []
-    for version in versions:
-        findings = session.scalars(
+    )
+    count = (
+        session.scalar(
+            select(func.count(ValuationVersion.id)).where(
+                ValuationVersion.status == version_status
+            )
+        )
+        or 0
+    )
+    rows = session.execute(base.offset((page - 1) * page_size).limit(page_size)).all()
+    version_ids = [version.id for version, _ in rows]
+    findings = (
+        session.scalars(
             select(ValidationResult).where(
-                ValidationResult.valuation_version_id == version.id
+                ValidationResult.valuation_version_id.in_(version_ids)
             )
         ).all()
-        data.append(
-            {
-                "id": version.id,
-                "fund_id": version.fund_id,
-                "fund_name": version.fund.standard_name,
-                "valuation_date": version.valuation_date.isoformat(),
-                "version_no": version.version_no,
-                "critical_count": sum(
-                    item.level == ValidationLevel.CRITICAL for item in findings
-                ),
-                "warning_count": sum(
-                    item.level == ValidationLevel.WARNING for item in findings
-                ),
-            }
+        if version_ids
+        else []
+    )
+    counts: dict[int, dict[str, int]] = {}
+    for finding in findings:
+        current = counts.setdefault(
+            finding.valuation_version_id, {"critical": 0, "warning": 0}
         )
-    return {"data": data, "meta": {"total": len(data)}}
+        if finding.level == ValidationLevel.CRITICAL:
+            current["critical"] += 1
+        elif finding.level == ValidationLevel.WARNING:
+            current["warning"] += 1
+    data = [
+        {
+            "id": version.id,
+            "fund_id": version.fund_id,
+            "fund_name": fund_name,
+            "valuation_date": version.valuation_date.isoformat(),
+            "version_no": version.version_no,
+            "status": version.status,
+            "critical_count": counts.get(version.id, {}).get("critical", 0),
+            "warning_count": counts.get(version.id, {}).get("warning", 0),
+        }
+        for version, fund_name in rows
+    ]
+    return {
+        "data": data,
+        "meta": {"page": page, "page_size": page_size, "total": count},
+    }
 
 
 @router.post("/reviews/{version_id}/acknowledge")

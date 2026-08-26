@@ -2,7 +2,7 @@
  * Mock API adapter — returns the same {data, meta} envelope the real backend uses.
  * Replace these functions with fetch() calls to /api/v1/... to go live.
  */
-import { sleep } from "@/utils/format";
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 import * as db from "./db";
 import type {
   JobStatus,

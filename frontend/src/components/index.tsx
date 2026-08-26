@@ -116,7 +116,7 @@ export function RoleGuard({ cap, children }: { cap: Capability; children: ReactN
 
 /* ---------- ConfirmReason: destructive-action confirmation with reason ---------- */
 const ConfirmCtx = createContext<{
-  confirm: (opts: ConfirmOpts) => Promise<boolean>;
+  confirm: (opts: ConfirmOpts) => Promise<string | null>;
 } | null>(null);
 
 interface ConfirmOpts {
@@ -132,9 +132,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState<ConfirmOpts | null>(null);
   const [reason, setReason] = useState("");
-  const resolver = useRef<(v: boolean) => void>(() => {});
+  const resolver = useRef<(v: string | null) => void>(() => {});
 
-  function confirm(o: ConfirmOpts): Promise<boolean> {
+  function confirm(o: ConfirmOpts): Promise<string | null> {
     setOpts(o);
     setReason("");
     setOpen(true);
@@ -143,7 +143,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  function close(v: boolean) {
+  function close(v: string | null) {
     setOpen(false);
     resolver.current(v);
   }
@@ -157,8 +157,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         okText={opts?.okText ?? "确认"}
         okButtonProps={{ danger: opts?.danger, disabled: opts?.reasonRequired && !reason }}
         cancelText="取消"
-        onCancel={() => close(false)}
-        onOk={() => close(true)}
+        onCancel={() => close(null)}
+        onOk={() => close(opts?.reasonRequired ? reason.trim() || null : reason.trim() || "")}
         destroyOnClose
       >
         {opts?.description && <p style={{ color: "var(--text-2)" }}>{opts.description}</p>}

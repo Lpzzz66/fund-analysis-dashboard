@@ -170,21 +170,29 @@ def list_rules(
     statement = select(RiskRule).order_by(RiskRule.rule_code, RiskRule.id.desc())
     if rule_code:
         statement = statement.where(RiskRule.rule_code == rule_code.strip())
-    rules = list(session.scalars(statement))
-    if not include_history:
-        latest: dict[str, RiskRule] = {}
-        for rule in rules:
-            latest.setdefault(rule.rule_code, rule)
-        rules = list(latest.values())
     if enabled is not None:
-        rules = [rule for rule in rules if rule.enabled == enabled]
+        statement = statement.where(RiskRule.enabled == enabled)
+    if not include_history:
+        latest_id = (
+            select(func.max(RiskRule.id)).group_by(RiskRule.rule_code).scalar_subquery()
+        )
+        statement = statement.where(RiskRule.id.in_(latest_id))
+    count_statement = select(func.count(RiskRule.id))
+    if rule_code:
+        count_statement = count_statement.where(RiskRule.rule_code == rule_code.strip())
+    if enabled is not None:
+        count_statement = count_statement.where(RiskRule.enabled == enabled)
+    if not include_history:
+        count_statement = count_statement.where(RiskRule.id.in_(latest_id))
     offset = (page - 1) * page_size
+    total = session.scalar(count_statement) or 0
+    rules = list(session.scalars(statement.offset(offset).limit(page_size)))
     return {
-        "data": [_rule_data(rule) for rule in rules[offset : offset + page_size]],
+        "data": [_rule_data(rule) for rule in rules],
         "meta": {
             "page": page,
             "page_size": page_size,
-            "total": len(rules),
+            "total": total,
             "include_history": include_history,
         },
     }

@@ -18,7 +18,7 @@ export class ApiError extends Error {
 }
 
 export interface ApiRequestOptions extends Omit<RequestInit, "body"> {
-  body?: BodyInit | Record<string, unknown> | null;
+  body?: BodyInit | object | null;
 }
 
 export function setUnauthorizedHandler(handler: UnauthorizedHandler): void {
@@ -60,14 +60,16 @@ function errorDetail(payload: unknown): string | null {
   return messages.length ? messages.join("；") : null;
 }
 
-async function parseJson(response: Response): Promise<unknown> {
+async function parseBody(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) return null;
-  try {
-    return await response.json();
-  } catch {
-    return null;
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
   }
+  return response.ok ? response.blob() : null;
 }
 
 export async function apiRequest<T>(
@@ -92,7 +94,7 @@ export async function apiRequest<T>(
   });
 
   if (response.status === 204) return undefined as T;
-  const payload = await parseJson(response);
+  const payload = await parseBody(response);
   if (!response.ok) {
     if (response.status === 401) unauthorizedHandler?.(requestGeneration);
     throw new ApiError(

@@ -1,133 +1,18 @@
 import { useEffect, useState } from "react";
-import { Button, Space, Table, Card, Tag, Select, Modal, Form, Input, Drawer, Timeline } from "antd";
-import * as api from "@/mock/api";
-import * as db from "@/mock/db";
-import { PageHeader, StatusRibbon, useToast, useConfirm } from "@/components";
-import { timeStr } from "@/utils/format";
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Table, Tag } from "antd";
+import * as authApi from "@/api/auth";
+import type { AdminUser } from "@/api/types";
+import { PageHeader, useConfirm, useToast } from "@/components";
 import { ROLE_LABEL, USER_STATUS_LABEL, type UserRole, type UserStatus } from "@/utils/constants";
 
 export default function AdminUsers() {
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [data, setData] = useState<db.UserRow[]>([]);
-  const [meta, setMeta] = useState({ page: 1, page_size: 20, total: 0 });
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<{ q?: string; role?: string; status?: string }>({});
-  const [createOpen, setCreateOpen] = useState(false);
-  const [resetOpen, setResetOpen] = useState<db.UserRow | null>(null);
-  const [loginOpen, setLoginOpen] = useState<db.UserRow | null>(null);
-  const [form] = Form.useForm();
-  const [resetForm] = Form.useForm();
-
-  async function load() {
-    setLoading(true);
-    const res = await api.usersList(filters);
-    setData(res.data);
-    setMeta(res.meta);
-    setLoading(false);
-  }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
-
-  async function createUser() {
-    await form.validateFields();
-    toast.success(`账号已创建（演示）`);
-    setCreateOpen(false); form.resetFields(); load();
-  }
-
-  async function changeRole(u: db.UserRow, role: UserRole) {
-    const ok = await confirm({ title: `修改 ${u.display_name} 的角色为 ${ROLE_LABEL[role]}`, description: "角色变更将写入审计日志。", okText: "确认修改" });
-    if (!ok) return;
-    await api.userAction(u.id, "role", { role });
-    toast.success("角色已修改");
-    load();
-  }
-
-  async function toggleUser(u: db.UserRow) {
-    const action = u.status === "active" ? "禁用" : "启用";
-    const ok = await confirm({ title: `${action}账号 ${u.username}`, reasonLabel: "原因", reasonRequired: u.status === "active", danger: u.status === "active", okText: action });
-    if (!ok) return;
-    await api.userAction(u.id, u.status === "active" ? "disable" : "enable");
-    toast.success(`已${action}`);
-    load();
-  }
-
-  async function resetPassword() {
-    await resetForm.validateFields();
-    toast.success(`已重置 ${resetOpen?.username} 的密码（演示），原会话已撤销`);
-    setResetOpen(null); resetForm.resetFields();
-  }
-
-  return (
-    <div className="fd-page">
-      <PageHeader
-        title="账号管理"
-        desc="管理员维护账号、角色和会话，任何变更都写入审计日志"
-        extra={<Button type="primary" onClick={() => setCreateOpen(true)}>新增账号</Button>}
-      />
-      <StatusRibbon asOf="—" version="—" coverage={{ available: 0, total: 0 }} quality="valid" />
-
-      <Card style={{ marginTop: 12 }}>
-        <Space wrap className="fd-filterbar">
-          <Input.Search allowClear placeholder="账号关键字" style={{ width: 180 }} onSearch={(v) => setFilters((f) => ({ ...f, q: v }))} />
-          <Select allowClear placeholder="角色" style={{ width: 130 }} onChange={(v) => setFilters((f) => ({ ...f, role: v }))} options={Object.entries(ROLE_LABEL).map(([k, v]) => ({ value: k, label: v }))} />
-          <Select allowClear placeholder="状态" style={{ width: 120 }} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} options={Object.entries(USER_STATUS_LABEL).map(([k, v]) => ({ value: k, label: v }))} />
-        </Space>
-        <Table
-          className="fd-table"
-          rowKey="id"
-          size="small"
-          loading={loading}
-          dataSource={data}
-          pagination={{ pageSize: 20, total: meta.total, size: "small" }}
-          columns={[
-            { title: "账号", dataIndex: "username", render: (v) => <span className="mono">{v}</span> },
-            { title: "显示名称", dataIndex: "display_name" },
-            { title: "角色", dataIndex: "role", width: 110, render: (v, r) => (
-              <Select size="small" value={v} onChange={(nv) => changeRole(r, nv as UserRole)} style={{ width: 100 }} options={Object.entries(ROLE_LABEL).map(([k, val]) => ({ value: k, label: val }))} />
-            ) },
-            { title: "状态", dataIndex: "status", width: 80, render: (v) => <Tag color={v === "active" ? "success" : "error"}>{USER_STATUS_LABEL[v as UserStatus]}</Tag> },
-            { title: "失败次数", dataIndex: "failed_login_count", width: 80, align: "right" },
-            { title: "最后登录", dataIndex: "last_login_at", render: timeStr, width: 160 },
-            {
-              title: "操作", width: 280, align: "center",
-              render: (_, r) => (
-                <Space size="small">
-                  <Button size="small" type="link" onClick={() => setResetOpen(r)}>重置密码</Button>
-                  <Button size="small" type="link" onClick={() => toggleUser(r)} danger={r.status === "active"}>{r.status === "active" ? "禁用" : "启用"}</Button>
-                  <Button size="small" type="link" onClick={() => toast.success("已强制退出该账号会话（演示）")}>强制退出</Button>
-                  <Button size="small" type="link" onClick={() => setLoginOpen(r)}>登录记录</Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
-      </Card>
-
-      <Modal open={createOpen} title="新增账号" onCancel={() => setCreateOpen(false)} onOk={createUser} okText="创建">
-        <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
-          <Form.Item label="账号" name="username" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item label="显示名称" name="display_name"><Input /></Form.Item>
-          <Form.Item label="角色" name="role" rules={[{ required: true }]}>
-            <Select options={Object.entries(ROLE_LABEL).map(([k, v]) => ({ value: k, label: v }))} />
-          </Form.Item>
-          <Form.Item label="初始密码" name="password" rules={[{ required: true }, { min: 8, message: "至少 8 位" }]}><Input.Password /></Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal open={!!resetOpen} title={`重置密码：${resetOpen?.username}`} onCancel={() => setResetOpen(null)} onOk={resetPassword} okText="重置">
-        <Form form={resetForm} layout="vertical" style={{ marginTop: 12 }}>
-          <Form.Item label="新密码" name="password" rules={[{ required: true }, { min: 8 }]}><Input.Password /></Form.Item>
-          <div className="fd-caption">重置后将撤销该账号所有会话。必须记录原因。</div>
-        </Form>
-      </Modal>
-
-      <Drawer open={!!loginOpen} title={`登录记录：${loginOpen?.username}`} onClose={() => setLoginOpen(null)} width={480}>
-        <Timeline items={[
-          { children: `${timeStr(loginOpen?.last_login_at)} · 登录成功 · 192.168.1.10` },
-          { children: "2026-08-25 09:12 · 登录成功 · 192.168.1.10" },
-          { children: "2026-08-24 18:30 · 退出登录" },
-        ]} />
-      </Drawer>
-    </div>
-  );
+  const toast = useToast(); const confirm = useConfirm(); const [rows, setRows] = useState<AdminUser[]>([]); const [total, setTotal] = useState(0); const [page, setPage] = useState(1); const [filters, setFilters] = useState<{ q?: string; role?: string; status?: string }>({}); const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [createOpen, setCreateOpen] = useState(false); const [resetUser, setResetUser] = useState<AdminUser | null>(null); const [form] = Form.useForm(); const [resetForm] = Form.useForm();
+  async function load() { setLoading(true); setError(null); try { const result = await authApi.listUsers({ ...filters, page, page_size: 20 }); setRows(result.data); setTotal(result.meta.total); } catch { setError("账号列表加载失败，请刷新重试"); } finally { setLoading(false); } }
+  useEffect(() => { void load(); }, [page, filters]);
+  async function create() { try { const values = await form.validateFields(); await authApi.createUser(values); toast.success("账号已创建"); setCreateOpen(false); form.resetFields(); await load(); } catch { setError("账号创建失败，请检查输入或账号是否重复"); } }
+  async function changeRole(user: AdminUser, role: UserRole) { const reason = await confirm({ title: `修改 ${user.username} 的角色`, description: `将角色改为“${ROLE_LABEL[role]}”，操作会写入审计日志。`, okText: "确认修改" }); if (reason === null) return; try { await authApi.changeUserRole(user.id, role); toast.success("角色已修改"); await load(); } catch { setError("角色修改失败"); } }
+  async function toggle(user: AdminUser) { const disabling = user.status === "active"; const reason = await confirm({ title: `${disabling ? "禁用" : "启用"}账号 ${user.username}`, reasonRequired: disabling, danger: disabling, okText: disabling ? "确认禁用" : "确认启用" }); if (reason === null) return; try { if (disabling) await authApi.disableUser(user.id); else await authApi.enableUser(user.id); toast.success(`账号已${disabling ? "禁用" : "启用"}`); await load(); } catch { setError("账号状态更新失败"); } }
+  async function resetPassword() { try { const values = await resetForm.validateFields(); await authApi.resetUserPassword(resetUser!.id, values.password); toast.success("密码已重置，原有会话已撤销"); setResetUser(null); resetForm.resetFields(); await load(); } catch { setError("密码重置失败"); } }
+  async function revoke(user: AdminUser) { const reason = await confirm({ title: `撤销 ${user.username} 的全部会话`, reasonRequired: true, danger: true, okText: "确认撤销" }); if (reason === null) return; try { await authApi.revokeUserSessions(user.id); toast.success("会话已撤销"); } catch { setError("会话撤销失败"); } }
+  return <div className="fd-page"><PageHeader title="账号管理" desc="管理员维护账号、角色和会话，变更由后端写入审计" extra={<Button type="primary" onClick={() => setCreateOpen(true)}>新增账号</Button>} />{error && <Alert type="error" showIcon message={error} />}<Card style={{ marginTop: 12 }}><Space wrap><Input.Search allowClear placeholder="账号关键字" style={{ width: 180 }} onSearch={(q) => { setPage(1); setFilters((f) => ({ ...f, q: q || undefined })); }} /><Select allowClear placeholder="角色" style={{ width: 130 }} onChange={(role) => { setPage(1); setFilters((f) => ({ ...f, role })); }} options={Object.entries(ROLE_LABEL).map(([value, label]) => ({ value, label }))} /><Select allowClear placeholder="状态" style={{ width: 120 }} onChange={(status) => { setPage(1); setFilters((f) => ({ ...f, status })); }} options={Object.entries(USER_STATUS_LABEL).map(([value, label]) => ({ value, label }))} /></Space><Table style={{ marginTop: 12 }} rowKey="id" size="small" loading={loading} dataSource={rows} pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: setPage }} columns={[{ title: "账号", dataIndex: "username" }, { title: "显示名称", dataIndex: "display_name" }, { title: "角色", dataIndex: "role", render: (value: UserRole, user: AdminUser) => <Select size="small" value={value} onChange={(role: UserRole) => void changeRole(user, role)} options={Object.entries(ROLE_LABEL).map(([v, label]) => ({ value: v, label }))} /> }, { title: "状态", dataIndex: "status", render: (value: UserStatus) => <Tag color={value === "active" ? "success" : "error"}>{USER_STATUS_LABEL[value]}</Tag> }, { title: "最后登录", dataIndex: "last_login_at" }, { title: "操作", render: (_: unknown, user: AdminUser) => <Space><Button type="link" size="small" onClick={() => setResetUser(user)}>重置密码</Button><Button type="link" size="small" danger={user.status === "active"} onClick={() => void toggle(user)}>{user.status === "active" ? "禁用" : "启用"}</Button><Button type="link" size="small" danger onClick={() => void revoke(user)}>撤销会话</Button></Space> }]} /></Card><Modal open={createOpen} title="新增账号" onCancel={() => setCreateOpen(false)} onOk={() => void create()} okText="创建"><Form form={form} layout="vertical"><Form.Item label="账号" name="username" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="显示名称" name="display_name"><Input /></Form.Item><Form.Item label="角色" name="role" rules={[{ required: true }]}><Select options={Object.entries(ROLE_LABEL).map(([value, label]) => ({ value, label }))} /></Form.Item><Form.Item label="初始密码" name="password" rules={[{ required: true }, { min: 8, message: "至少 8 位" }]}><Input.Password /></Form.Item></Form></Modal><Modal open={resetUser !== null} title={`重置密码：${resetUser?.username ?? ""}`} onCancel={() => setResetUser(null)} onOk={() => void resetPassword()} okText="重置"><Form form={resetForm} layout="vertical"><Form.Item label="新密码" name="password" rules={[{ required: true }, { min: 8, message: "至少 8 位" }]}><Input.Password /></Form.Item></Form></Modal></div>;
 }

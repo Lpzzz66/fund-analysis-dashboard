@@ -1,141 +1,22 @@
 import { useEffect, useState } from "react";
-import { Tabs, Table, Button, Card, Form, Input, DatePicker, Tag, Space, Modal, Drawer, Timeline, Select } from "antd";
-import { useSearchParams } from "react-router-dom";
+import { Alert, Button, Card, DatePicker, Form, Input, Modal, Space, Table, Tag } from "antd";
 import dayjs from "dayjs";
-import * as db from "@/mock/db";
-import { Num, PageHeader, StatusRibbon, useToast, RoleGuard, useConfirm } from "@/components";
-import { dateStr } from "@/utils/format";
-import { strategyOptions } from "@/mock/db";
+import * as catalogApi from "@/api/catalog";
+import type { Alias, CatalogFund, ShareClass } from "@/api/types";
+import { PageHeader, useConfirm, useToast } from "@/components";
+import { type FundStatus } from "@/utils/constants";
+
+const FUND_STATUS_LABEL: Record<FundStatus, string> = { active: "启用", inactive: "停用" };
 
 export default function AdminFunds() {
-  const [params] = useSearchParams();
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [tab, setTab] = useState("basic");
-  const [funds] = useState(db.funds);
-  const [selected, setSelected] = useState(db.funds.find((f) => f.id === Number(params.get("fund"))) ?? db.funds[0]);
-  const [form] = Form.useForm();
-  const [aliasForm] = Form.useForm();
-  const [scForm] = Form.useForm();
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [scOpen, setScOpen] = useState(false);
-
-  useEffect(() => {
-    form.setFieldsValue({
-      ...selected,
-      establishment_date: selected.establishment_date ? dayjs(selected.establishment_date) : undefined,
-    });
-  }, [selected]);
-
-  async function saveBasic() {
-    await form.validateFields();
-    toast.success("产品基本信息已保存（演示）");
-  }
-
-  async function toggleFundStatus() {
-    const action = selected.status === "active" ? "停用" : "启用";
-    const ok = await confirm({ title: `${action}产品：${selected.name}`, reasonLabel: "原因", reasonRequired: selected.status === "active", danger: selected.status === "active", okText: action });
-    if (!ok) return;
-    toast.success(`已${action}（演示）`);
-  }
-
-  async function addAlias() {
-    const v = await aliasForm.validateFields();
-    toast.success(`已添加别名"${v.alias}"，冲突检查通过（演示）`);
-    aliasForm.resetFields();
-  }
-
-  return (
-    <div className="fd-page">
-      <PageHeader title="产品管理" desc="由业务员和管理员维护产品主数据，不把产品信息硬编码到程序中" />
-      <StatusRibbon asOf="2026-08-22" version="—" coverage={{ available: 7, total: 8 }} quality="valid" />
-
-      <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 12 }}>
-        <Card size="small">
-          <Space wrap>
-            <Select style={{ width: 240 }} value={selected.id} onChange={(v) => setSelected(funds.find((f) => f.id === v)!)} options={funds.map((f) => ({ value: f.id, label: f.name }))} />
-          </Space>
-        </Card>
-
-        <Tabs
-          activeKey={tab}
-          onChange={setTab}
-          items={[
-            { key: "basic", label: "9.1 基本信息", children: (
-              <Card>
-                <Form form={form} layout="vertical" style={{ maxWidth: 600 }}>
-                  <Form.Item label="标准名称" name="name" rules={[{ required: true }]}><Input /></Form.Item>
-                  <Form.Item label="产品代码" name="product_code"><Input /></Form.Item>
-                  <Form.Item label="成立日期" name="establishment_date"><DatePicker style={{ width: "100%" }} /></Form.Item>
-                  <Form.Item label="策略说明" name="strategy"><Select options={strategyOptions.map((s) => ({ value: s, label: s }))} /></Form.Item>
-                  <Form.Item label="负责人" name="manager"><Input /></Form.Item>
-                  <Form.Item label="状态" name="status"><Input disabled /></Form.Item>
-                  <Form.Item label="备注" name="notes"><Input.TextArea rows={2} /></Form.Item>
-                  <RoleGuard cap="adminFunds">
-                    <Space>
-                      <Button type="primary" onClick={saveBasic}>保存</Button>
-                      <Button danger={selected.status === "active"} onClick={toggleFundStatus}>{selected.status === "active" ? "停用" : "启用"}</Button>
-                      <Button onClick={() => setHistoryOpen(true)}>查看变更记录</Button>
-                    </Space>
-                  </RoleGuard>
-                </Form>
-              </Card>
-            )},
-            { key: "shares", label: "9.2 份额类别", children: (
-              <Card title={<span className="fd-section-title">份额类别</span>} extra={<RoleGuard cap="adminFunds"><Button size="small" type="primary" onClick={() => setScOpen(true)}>新增份额</Button></RoleGuard>}>
-                <Table className="fd-table" rowKey="id" size="small" pagination={false} dataSource={selected.share_classes}
-                  columns={[
-                    { title: "份额代码", dataIndex: "share_code", width: 90, render: (v) => <span className="mono">{v}</span> },
-                    { title: "份额名称", dataIndex: "share_name" },
-                    { title: "启用日期", dataIndex: "enabled_from", render: dateStr, width: 110 },
-                    { title: "停用日期", dataIndex: "disabled_from", render: dateStr, width: 110 },
-                    { title: "状态", dataIndex: "status", width: 80, render: (v) => <Tag color={v === "active" ? "success" : "default"}>{v === "active" ? "启用" : "停用"}</Tag> },
-                    { title: "操作", width: 140, render: (_, r) => <RoleGuard cap="adminFunds"><Space size="small"><Button size="small" type="link">编辑</Button><Button size="small" type="link">{r.status === "active" ? "停用" : "恢复"}</Button><Button size="small" type="link">历史</Button></Space></RoleGuard> },
-                  ]}
-                />
-              </Card>
-            )},
-            { key: "aliases", label: "9.3 识别别名", children: (
-              <Card title={<span className="fd-section-title">识别别名</span>} extra={
-                <RoleGuard cap="adminFunds">
-                  <Form form={aliasForm} layout="inline" onFinish={addAlias}>
-                    <Form.Item name="alias" rules={[{ required: true }]}><Input placeholder="输入别名后回车" style={{ width: 200 }} /></Form.Item>
-                    <Form.Item><Button type="primary" htmlType="submit" size="small">新增别名</Button></Form.Item>
-                  </Form>
-                </RoleGuard>
-              }>
-                <Table className="fd-table" rowKey="id" size="small" pagination={false} dataSource={selected.aliases}
-                  columns={[
-                    { title: "别名", dataIndex: "alias" },
-                    { title: "来源位置", dataIndex: "source_location", width: 120 },
-                    { title: "匹配优先级", dataIndex: "match_priority", width: 100, align: "right", render: (v) => <Num>{v}</Num> },
-                    { title: "有效期", width: 160, render: (_, r) => `${dateStr(r.valid_from)} ~ ${dateStr(r.valid_to)}` },
-                    { title: "操作", width: 80, render: () => <RoleGuard cap="adminFunds"><Button size="small" type="link" danger>删除</Button></RoleGuard> },
-                  ]}
-                />
-                <div className="fd-caption" style={{ marginTop: 8 }}>别名保存后执行冲突检查，防止一个别名匹配多个产品。</div>
-              </Card>
-            )},
-          ]}
-        />
-      </Space>
-
-      <Drawer open={historyOpen} title="变更记录" onClose={() => setHistoryOpen(false)} width={480}>
-        <Timeline items={[
-          { children: "2026-08-22 · 停用产品，原因：产品清盘" },
-          { children: "2026-06-15 · 修改策略说明为股票多头" },
-          { children: "2026-01-15 · 创建产品" },
-        ]} />
-      </Drawer>
-
-      <Modal open={scOpen} title="新增份额类别" onCancel={() => setScOpen(false)} onOk={async () => { await scForm.validateFields(); toast.success("份额类别已新增（演示）"); setScOpen(false); scForm.resetFields(); }} okText="保存">
-        <Form form={scForm} layout="vertical" style={{ marginTop: 12 }}>
-          <Form.Item label="份额代码" name="share_code" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item label="份额名称" name="share_name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item label="启用日期" name="enabled_from"><DatePicker style={{ width: "100%" }} /></Form.Item>
-          <Form.Item label="备注" name="notes"><Input.TextArea rows={2} /></Form.Item>
-        </Form>
-      </Modal>
-    </div>
-  );
+  const toast = useToast(); const confirm = useConfirm(); const [funds, setFunds] = useState<CatalogFund[]>([]); const [total, setTotal] = useState(0); const [page, setPage] = useState(1); const [selected, setSelected] = useState<CatalogFund | null>(null); const [aliases, setAliases] = useState<Alias[]>([]); const [shares, setShares] = useState<ShareClass[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [fundOpen, setFundOpen] = useState(false); const [aliasOpen, setAliasOpen] = useState(false); const [shareOpen, setShareOpen] = useState(false); const [fundForm] = Form.useForm(); const [aliasForm] = Form.useForm(); const [shareForm] = Form.useForm();
+  async function load() { setLoading(true); setError(null); try { const result = await catalogApi.listFunds({ page, page_size: 20 }); setFunds(result.data); setTotal(result.meta.total); if (!selected && result.data[0]) await selectFund(result.data[0]); } catch { setError("产品目录加载失败，请刷新重试"); } finally { setLoading(false); } }
+  async function selectFund(fund: CatalogFund) { try { const [detail, a, s] = await Promise.all([catalogApi.getFund(fund.id), catalogApi.listAliases(fund.id), catalogApi.listShareClasses(fund.id)]); setSelected({ ...fund, standard_name: detail.data.name, establishment_date: detail.data.establishment_date, strategy: detail.data.strategy, manager: detail.data.manager, notes: detail.data.notes }); setAliases(a.data); setShares(s.data); } catch { setError("产品详情或附属信息加载失败"); } }
+  useEffect(() => { void load(); }, [page]);
+  async function saveFund() { try { const values = await fundForm.validateFields(); const payload = { standard_name: values.standard_name, product_code: values.product_code, establishment_date: values.establishment_date?.format("YYYY-MM-DD"), notes: values.notes || null }; if (selected) await catalogApi.updateFund(selected.id, payload); else await catalogApi.createFund({ ...payload, aliases: [{ alias: values.alias }] }); toast.success("产品已保存"); setFundOpen(false); await load(); } catch { setError("产品保存失败，请检查名称、代码、别名和日期"); } }
+  async function toggleFund() { if (!selected) return; const disabling = selected.status === "active"; const reason = await confirm({ title: `${disabling ? "停用" : "启用"}产品`, reasonRequired: disabling, danger: disabling, okText: "确认" }); if (reason === null) return; try { if (disabling) await catalogApi.disableFund(selected.id, reason); else await catalogApi.enableFund(selected.id); toast.success("产品状态已更新"); await load(); } catch { setError("产品状态更新失败"); } }
+  async function saveAlias() { if (!selected) return; try { await catalogApi.createAlias(selected.id, await aliasForm.validateFields()); toast.success("别名已新增"); setAliasOpen(false); aliasForm.resetFields(); await selectFund(selected); } catch { setError("别名保存失败"); } }
+  async function deleteAlias(alias: Alias) { if (!selected) return; const reason = await confirm({ title: "删除识别别名", reasonRequired: true, danger: true, okText: "确认删除" }); if (reason === null) return; try { await catalogApi.deleteAlias(selected.id, alias.id); toast.success("别名已删除"); await selectFund(selected); } catch { setError("别名删除失败"); } }
+  async function saveShare() { if (!selected) return; try { const values = await shareForm.validateFields(); await catalogApi.createShareClass(selected.id, { ...values, enabled_from: values.enabled_from?.format("YYYY-MM-DD") }); toast.success("份额类别已新增"); setShareOpen(false); shareForm.resetFields(); await selectFund(selected); } catch { setError("份额类别保存失败"); } }
+  return <div className="fd-page"><PageHeader title="产品管理" desc="维护产品、识别别名和份额类别；历史估值数据不会被删除" extra={<Button type="primary" onClick={() => { setSelected(null); fundForm.resetFields(); setFundOpen(true); }}>新增产品</Button>} />{error && <Alert type="error" showIcon message={error} />}<Card style={{ marginTop: 12 }}><Table rowKey="id" size="small" loading={loading} dataSource={funds} pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: setPage }} columns={[{ title: "产品名称", render: (_: unknown, fund: CatalogFund) => fund.standard_name ?? fund.name ?? "—" }, { title: "产品代码", dataIndex: "product_code" }, { title: "估值日", dataIndex: "valuation_date" }, { title: "状态", dataIndex: "status", render: (v: FundStatus) => <Tag>{FUND_STATUS_LABEL[v]}</Tag> }, { title: "操作", render: (_: unknown, fund: CatalogFund) => <Button type="link" onClick={() => void selectFund(fund)}>维护</Button> }]} /></Card>{selected && <Card style={{ marginTop: 12 }} title={`${selected.standard_name ?? selected.name ?? "产品"}（${selected.product_code ?? "无代码"}）`} extra={<Space><Button onClick={() => { fundForm.setFieldsValue({ ...selected, establishment_date: selected.establishment_date ? dayjs(selected.establishment_date) : undefined }); setFundOpen(true); }}>编辑产品</Button><Button danger={selected.status === "active"} onClick={() => void toggleFund()}>{selected.status === "active" ? "停用" : "启用"}</Button></Space>}><Space direction="vertical" style={{ width: "100%" }}><Card size="small" title="识别别名" extra={<Button size="small" onClick={() => setAliasOpen(true)}>新增别名</Button>}><Table rowKey="id" size="small" pagination={false} dataSource={aliases} columns={[{ title: "别名", dataIndex: "alias" }, { title: "优先级", dataIndex: "match_priority" }, { title: "操作", render: (_: unknown, alias: Alias) => <Button danger type="link" size="small" onClick={() => void deleteAlias(alias)}>删除</Button> }]} /></Card><Card size="small" title="份额类别" extra={<Button size="small" onClick={() => setShareOpen(true)}>新增份额</Button>}><Table rowKey="id" size="small" pagination={false} dataSource={shares} columns={[{ title: "代码", dataIndex: "share_code" }, { title: "名称", dataIndex: "share_name" }, { title: "状态", dataIndex: "status" }]} /></Card></Space></Card>}<Modal open={fundOpen} title={selected ? "编辑产品" : "新增产品"} onCancel={() => setFundOpen(false)} onOk={() => void saveFund()} okText="保存"><Form form={fundForm} layout="vertical"><Form.Item label="标准名称" name="standard_name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="产品代码" name="product_code" rules={[{ required: true }]}><Input /></Form.Item>{!selected && <Form.Item label="初始识别别名" name="alias" rules={[{ required: true, message: "至少填写一个不同于标准名称的别名" }, ({ getFieldValue }) => ({ validator(_, value) { return value && value.trim().toLowerCase() !== String(getFieldValue("standard_name") ?? "").trim().toLowerCase() ? Promise.resolve() : Promise.reject(new Error("别名必须不同于标准名称")); } })]}><Input /></Form.Item>}<Form.Item label="成立日期" name="establishment_date" rules={[{ required: true }]}><DatePicker style={{ width: "100%" }} /></Form.Item><Form.Item label="备注" name="notes"><Input.TextArea /></Form.Item></Form></Modal><Modal open={aliasOpen} title="新增识别别名" onCancel={() => setAliasOpen(false)} onOk={() => void saveAlias()} okText="保存"><Form form={aliasForm} layout="vertical"><Form.Item label="别名" name="alias" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="匹配优先级" name="match_priority" initialValue={0}><Input /></Form.Item></Form></Modal><Modal open={shareOpen} title="新增份额类别" onCancel={() => setShareOpen(false)} onOk={() => void saveShare()} okText="保存"><Form form={shareForm} layout="vertical"><Form.Item label="份额代码" name="share_code" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="份额名称" name="share_name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="启用日期" name="enabled_from"><DatePicker style={{ width: "100%" }} /></Form.Item></Form></Modal></div>;
 }

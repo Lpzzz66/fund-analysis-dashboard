@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
 from app.db.models import AnalysisRun, FundMetricDaily, ValuationVersion
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .conftest import seed_published_fund
 

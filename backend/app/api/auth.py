@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -222,17 +222,22 @@ def list_users(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, object]:
     statement = select(User).order_by(User.username, User.id)
+    count_statement = select(func.count(User.id))
     if q:
-        statement = statement.where(User.username.contains(q.strip()))
+        predicate = User.username.contains(q.strip())
+        statement = statement.where(predicate)
+        count_statement = count_statement.where(predicate)
     if role is not None:
         statement = statement.where(User.role == role)
+        count_statement = count_statement.where(User.role == role)
     if user_status is not None:
         statement = statement.where(User.status == user_status)
-    users = list(session.scalars(statement))
-    total = len(users)
+        count_statement = count_statement.where(User.status == user_status)
     offset = (page - 1) * page_size
+    total = session.scalar(count_statement) or 0
+    users = list(session.scalars(statement.offset(offset).limit(page_size)))
     return {
-        "data": [_user_data(user) for user in users[offset : offset + page_size]],
+        "data": [_user_data(user) for user in users],
         "meta": {"page": page, "page_size": page_size, "total": total},
     }
 

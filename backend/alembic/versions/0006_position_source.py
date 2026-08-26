@@ -1,7 +1,6 @@
 """Add row-level source details to subjects and positions."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0006_position_source"

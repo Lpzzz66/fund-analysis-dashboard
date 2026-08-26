@@ -6,10 +6,6 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.auth.dependencies import get_db
 from app.db.base import (
     Base,
@@ -30,6 +26,9 @@ from app.db.models import (
 from app.db.session import create_engine
 from app.main import create_app
 from app.publishing import PublishingService
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()

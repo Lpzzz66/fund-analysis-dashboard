@@ -38,6 +38,7 @@ tmp-batch-*.db
 # IDE and OS files
 .idea/
 .vscode/
+.zcode/
 *.swp
 Thumbs.db
 Desktop.ini

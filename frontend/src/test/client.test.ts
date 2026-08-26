@@ -52,6 +52,20 @@ describe("apiRequest", () => {
     await expect(apiRequest<void>("/auth/logout", { method: "POST" })).resolves.toBeUndefined();
   });
 
+  it("returns binary responses as blobs", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("excel-bytes", {
+        status: 200,
+        headers: { "content-type": "application/vnd.ms-excel" },
+      }),
+    );
+
+    const result = await apiRequest<Blob>("/imports/1/source/2");
+
+    expect(result).toBeInstanceOf(Blob);
+    await expect(result.text()).resolves.toBe("excel-bytes");
+  });
+
   it("throws a safe ApiError and notifies on 401", async () => {
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);

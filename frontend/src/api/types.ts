@@ -2,6 +2,7 @@ import type { UserRole, UserStatus } from "@/utils/constants";
 
 export interface ApiEnvelope<T> {
   data: T;
+  meta?: Record<string, unknown>;
 }
 
 export interface AuthStatus {
@@ -63,7 +64,7 @@ export interface ImportValidationVersion {
   version_id: number; fund_id: number; valuation_date: string;
   status: import("@/utils/constants").ValuationStatus; findings: ImportValidationFinding[];
 }
-export interface ReviewItem { id: number; fund_id: number; fund_name: string; valuation_date: string; version_no: number; critical_count: number; warning_count: number; }
+export interface ReviewItem { id: number; fund_id: number; fund_name: string; valuation_date: string; version_no: number; status: import("@/utils/constants").ValuationStatus; critical_count: number; warning_count: number; }
 export interface MailSettings {
   host: string; port: number; username: string; configured: boolean; credential_source: string;
   credential_writable: boolean; auto_sync_enabled: boolean;
@@ -74,3 +75,14 @@ export interface MailSyncResult {
   failed_attachments: number; failed_messages: number; batches_created: number; error_count: number; error_codes: string[];
   created_at?: string; summary?: Record<string, unknown>;
 }
+export interface CatalogFund { id: number; standard_name?: string; name?: string; product_code: string | null; establishment_date?: string | null; strategy?: string | null; manager?: string | null; notes?: string | null; status: import("@/utils/constants").FundStatus; }
+export interface Alias { id: number; fund_id: number; alias: string; source_location: string | null; match_priority: number; valid_from: string | null; valid_to: string | null; }
+export interface ShareClass { id: number; fund_id: number; share_code: string; share_name: string; status: "active" | "inactive"; enabled_from: string | null; disabled_from: string | null; notes: string | null; }
+export interface SubjectMapping { id: number; subject_code_or_prefix: string | null; raw_name_pattern: string | null; standard_category: string; is_leaf: boolean; include_in_holdings: boolean; valid_from: string | null; valid_to: string | null; rule_version: string; status: import("@/utils/constants").MappingStatus; }
+export interface RiskRule { id: number; rule_code: string; rule_type: string; scope: string; threshold: string; severity: import("@/utils/constants").RiskSeverity; valid_from: string | null; valid_to: string | null; version: string; enabled: boolean; }
+export interface AdminUser { id: number; username: string; display_name: string; role: import("@/utils/constants").UserRole; status: import("@/utils/constants").UserStatus; last_login_at: string | null; navigation: string[]; }
+export interface AuditLog { id: number; actor_user_id: number | null; action: string; resource_type: string; resource_id: string | null; summary: unknown; reason: string | null; result: import("@/utils/constants").AuditResult; created_at: string; }
+export type SystemSetting = { value: number | string | boolean; source: string };
+export type SystemSettings = Record<string, SystemSetting>;
+export interface MaintenanceResult { command: string; status: string; summary: Record<string, unknown>; error_code?: string; }
+export interface OperationalSummary { [key: string]: unknown; }

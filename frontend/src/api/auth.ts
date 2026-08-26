@@ -1,6 +1,8 @@
 import { apiRequest } from "./client";
 import type {
   ApiEnvelope,
+  ApiPage,
+  AdminUser,
   AuthStatus,
   ChangePasswordInput,
   InitializeInput,
@@ -51,3 +53,18 @@ export async function changePassword(
   );
   return response.data;
 }
+
+export function listUsers(params: { q?: string; role?: string; status?: string; page?: number; page_size?: number } = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
+  return apiRequest<ApiPage<AdminUser>>(`/users?${query.toString()}`);
+}
+
+export function createUser(payload: { username: string; password: string; role: string; display_name?: string }) {
+  return apiRequest<ApiEnvelope<UserSession>>("/users", { method: "POST", body: payload });
+}
+export function disableUser(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/disable`, { method: "POST" }); }
+export function enableUser(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/enable`, { method: "POST" }); }
+export function changeUserRole(id: number, role: string) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/role`, { method: "PATCH", body: { role } }); }
+export function resetUserPassword(id: number, password: string) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/reset-password`, { method: "POST", body: { password } }); }
+export function revokeUserSessions(id: number) { return apiRequest<ApiEnvelope<UserSession>>(`/users/${id}/revoke-sessions`, { method: "POST" }); }

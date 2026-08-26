@@ -1,2 +1,12 @@
-// Mail endpoints are added here as their page is connected in the next task.
-export {};
+import { apiRequest } from "./client";
+import type { ApiEnvelope, MailSettings, MailSyncResult } from "./types";
+
+export function getSettings() { return apiRequest<ApiEnvelope<MailSettings>>("/mail/settings"); }
+export function updateCredential(authorization_code: string) {
+  return apiRequest<ApiEnvelope<{ configured: boolean; credential_source: string; credential_writable: boolean }>>("/mail/credential", { method: "PUT", body: { authorization_code } });
+}
+export function testConnection() { return apiRequest<ApiEnvelope<{ connected: boolean }>>("/mail/test-connection", { method: "POST" }); }
+export function syncNow() { return apiRequest<ApiEnvelope<MailSyncResult>>("/mail/sync", { method: "POST" }); }
+export function pause() { return apiRequest<ApiEnvelope<{ auto_sync_enabled: boolean }>>("/mail/pause", { method: "POST" }); }
+export function resume() { return apiRequest<ApiEnvelope<{ auto_sync_enabled: boolean }>>("/mail/resume", { method: "POST" }); }
+export function listSyncRuns() { return apiRequest<ApiEnvelope<MailSyncResult[]>>("/mail/sync-runs"); }

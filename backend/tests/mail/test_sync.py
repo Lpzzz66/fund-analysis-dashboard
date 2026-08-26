@@ -4,11 +4,10 @@ import os
 import stat
 
 import pytest
+from app.db.models import AuditLog, ImportBatch, SourceFile, SourceMessage
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
-from app.db.models import AuditLog, ImportBatch, SourceFile, SourceMessage
 
 from .conftest import FakeMailbox, make_email, make_xlsx_bytes
 
