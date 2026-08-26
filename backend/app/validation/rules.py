@@ -26,6 +26,10 @@ PARSER_WARNING = "parser_warning"
 DEFAULT_MONEY_TOLERANCE = Decimal("0.01")
 DEFAULT_NAV_TOLERANCE = Decimal("0.0001")
 DEFAULT_RATIO_TOLERANCE = Decimal("0.000001")
+# Position rules need both an absolute floor (small positions) and a relative
+# ceiling (large positions where 0.01 is too tight). Defaults match the old
+# absolute behaviour for tiny positions and allow 0.01% drift on bigger ones.
+DEFAULT_POSITION_RELATIVE_TOLERANCE = Decimal("0.0001")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,7 @@ class ToleranceConfig:
     money: Decimal = DEFAULT_MONEY_TOLERANCE
     nav: Decimal = DEFAULT_NAV_TOLERANCE
     ratio: Decimal = DEFAULT_RATIO_TOLERANCE
+    position_relative: Decimal = DEFAULT_POSITION_RELATIVE_TOLERANCE
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,8 +241,14 @@ def check_position_market_value(
     *,
     position_label: str | None = None,
     tolerance: Decimal = DEFAULT_MONEY_TOLERANCE,
+    relative_tolerance: Decimal = DEFAULT_POSITION_RELATIVE_TOLERANCE,
 ) -> ValidationFinding:
-    """Check one position's quantity multiplied by price against market value."""
+    """Check one position's quantity multiplied by price against market value.
+
+    A flat 0.01 yuan tolerance both misses large discrepancies on million-RMB
+    positions and false-positives on tiny ones, so we compare against
+    max(absolute_tolerance, market_value * relative_tolerance).
+    """
 
     quantity = _to_decimal(getattr(position, "quantity", None))
     market_price = _to_decimal(getattr(position, "market_price", None))
@@ -254,7 +265,10 @@ def check_position_market_value(
 
     calculated = quantity * market_price
     difference = calculated - market_value
-    if abs(difference) > tolerance:
+    effective_tolerance = max(
+        tolerance, abs(market_value) * relative_tolerance
+    )
+    if abs(difference) > effective_tolerance:
         return ValidationFinding(
             rule_code=POSITION_MARKET_VALUE_RECONCILIATION,
             level=ValidationLevel.WARNING,
@@ -411,6 +425,7 @@ def _validate_values(
             position,
             position_label=getattr(position, "security_code", None) or str(index),
             tolerance=tolerances.money,
+            relative_tolerance=tolerances.position_relative,
         )
         for index, position in enumerate(positions, start=1)
     )

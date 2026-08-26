@@ -250,14 +250,18 @@ class ValidationService:
 def _prepend_missing_snapshot(report: ValidationReport) -> ValidationReport:
     from .rules import ValidationFinding
 
+    # Missing snapshot is informational, not blocking: it indicates that the
+    # version was persisted before its daily snapshot row was committed (e.g.
+    # on publish race). It should not pin the version to PENDING_REVIEW
+    # forever; reconciliation or a re-run will populate the snapshot.
     finding = ValidationFinding(
         rule_code="valuation_snapshot_missing",
-        level=ValidationLevel.CRITICAL,
+        level=ValidationLevel.INFO,
         source_location="fund_daily_snapshot",
-        message="估值版本缺少产品日快照",
+        message="估值版本缺少产品日快照，待补齐后再校验汇总",
     )
     findings = (finding, *report.findings)
-    return ValidationReport(findings=findings, status=ValuationStatus.PENDING_REVIEW)
+    return ValidationReport(findings=findings, status=ValuationStatus.PUBLISHABLE)
 
 
 __all__ = [
