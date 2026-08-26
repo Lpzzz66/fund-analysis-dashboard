@@ -173,8 +173,12 @@ class TestReportContent:
         by_action = {}
         for r in rows:
             by_action.setdefault(r["action"], []).append(r)
-        # 冲突双方都是 needs_review，未被自动选择
+        # 冲突双方都是 needs_review，未被自动选择。
         conflict_rows = [r for r in rows if "same_date_conflict" in r["note"]]
+        assert {r["rel_path"] for r in conflict_rows} == {
+            "梦一号估值表/2026年01-12月/2026年01月/梦一号 01月06日.xlsx",
+            "gz/梦一号估值表/2026年01-12月/2026年01月/梦一号 01月06日.xlsx",
+        }
         assert len(conflict_rows) == 2
         assert all(r["action"] == "needs_review" for r in conflict_rows)
         # gz 独有日期 → 补充候选

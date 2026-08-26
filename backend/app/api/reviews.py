@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
-from app.db.base import UserRole, ValidationLevel
+from app.db.base import UserRole, ValidationLevel, ValuationStatus
 from app.db.models import Fund, ValidationResult, ValuationVersion
 from app.publishing import (
     PublishingService,
@@ -52,7 +52,7 @@ def list_reviews(
     versions = session.scalars(
         select(ValuationVersion)
         .join(Fund, Fund.id == ValuationVersion.fund_id)
-        .where(ValuationVersion.status == "pending_review")
+        .where(ValuationVersion.status == ValuationStatus.PENDING_REVIEW)
         .order_by(ValuationVersion.valuation_date, ValuationVersion.id)
     ).all()
     data = []

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from app.db.models import AuditLog
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from app.db.models import AuditLog
 
 
 def _role_client(admin_client: TestClient, role: str) -> TestClient:

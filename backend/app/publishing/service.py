@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -313,9 +312,6 @@ class PublishingService:
         except SQLAlchemyError as exc:
             raise PublishingServiceError("publication_persistence_failed") from exc
 
-    def publish(self, version_id: int, **kwargs: Any) -> PublicationResult:
-        return self.publish_version(version_id, **kwargs)
-
     def revoke_version(
         self,
         version_id: int,
@@ -354,9 +350,6 @@ class PublishingService:
             raise
         except SQLAlchemyError as exc:
             raise PublishingServiceError("revoke_persistence_failed") from exc
-
-    def revoke(self, version_id: int, **kwargs: Any) -> PublicationResult:
-        return self.revoke_version(version_id, **kwargs)
 
     def restore_version(
         self,
@@ -424,9 +417,6 @@ class PublishingService:
             raise PublishingConflictError("publication_conflict") from exc
         except SQLAlchemyError as exc:
             raise PublishingServiceError("restore_persistence_failed") from exc
-
-    def restore(self, version_id: int, **kwargs: Any) -> PublicationResult:
-        return self.restore_version(version_id, **kwargs)
 
     def _load_version(
         self, version_id: int, *, for_update: bool = False

@@ -92,15 +92,15 @@ def _released_version(session: Session, status: ValuationStatus) -> ValuationVer
     version = _version(session, fund, 1)
     session.commit()
     service = PublishingService(session)
-    service.publish(version.id, actor_user_id=actor.id)
+    service.publish_version(version.id, actor_user_id=actor.id)
     session.commit()
     if status == ValuationStatus.SUPERSEDED:
         replacement = _version(session, fund, 2)
         session.commit()
-        service.publish(replacement.id, actor_user_id=actor.id)
+        service.publish_version(replacement.id, actor_user_id=actor.id)
         session.commit()
     elif status == ValuationStatus.REVOKED:
-        service.revoke(version.id, actor_user_id=actor.id, reason="撤回测试")
+        service.revoke_version(version.id, actor_user_id=actor.id, reason="撤回测试")
         session.commit()
     return version
 
@@ -172,9 +172,9 @@ def test_new_publication_supersedes_old_version_and_leaves_only_one_current(
     session.commit()
     service = PublishingService(session)
 
-    service.publish(first.id, actor_user_id=actor.id)
+    service.publish_version(first.id, actor_user_id=actor.id)
     session.commit()
-    result = service.publish(second.id, actor_user_id=actor.id)
+    result = service.publish_version(second.id, actor_user_id=actor.id)
     session.commit()
 
     published_count = session.scalar(
@@ -207,10 +207,10 @@ def test_warning_requires_explicit_confirmation(session: Session) -> None:
     with pytest.raises(
         PublishingValidationError, match="warning_confirmation_required"
     ):
-        service.publish(version.id, actor_user_id=actor.id)
+        service.publish_version(version.id, actor_user_id=actor.id)
     assert version.status == ValuationStatus.PUBLISHABLE
 
-    service.publish(
+    service.publish_version(
         version.id,
         actor_user_id=actor.id,
         confirm_warnings=True,
@@ -242,7 +242,7 @@ def test_critical_result_requires_review_before_publication(session: Session) ->
         note="已核对原始估值表，确认可发布",
     )
     assert review.status == ValuationStatus.PUBLISHABLE
-    service.publish(version.id, actor_user_id=actor.id)
+    service.publish_version(version.id, actor_user_id=actor.id)
     session.commit()
 
     assert version.status == ValuationStatus.PUBLISHED
@@ -278,7 +278,7 @@ def test_review_rejection_is_terminal_and_audited(session: Session) -> None:
     with pytest.raises(
         PublishingStateError, match="invalid_status_for_action:rejected"
     ):
-        PublishingService(session).publish(version.id, actor_user_id=actor.id)
+        PublishingService(session).publish_version(version.id, actor_user_id=actor.id)
     audit = session.scalar(
         select(AuditLog).where(AuditLog.action == "valuation.review_rejected")
     )
@@ -291,10 +291,10 @@ def test_revoke_removes_current_version_and_is_audited(session: Session) -> None
     version = _version(session, fund, 1)
     session.commit()
     service = PublishingService(session)
-    service.publish(version.id, actor_user_id=actor.id)
+    service.publish_version(version.id, actor_user_id=actor.id)
     session.commit()
 
-    result = service.revoke(
+    result = service.revoke_version(
         version.id,
         actor_user_id=actor.id,
         reason="发现来源文件有误",
@@ -321,12 +321,12 @@ def test_restore_old_version_supersedes_current_and_records_new_release_action(
     second = _version(session, fund, 2)
     session.commit()
     service = PublishingService(session)
-    service.publish(first.id, actor_user_id=actor.id)
+    service.publish_version(first.id, actor_user_id=actor.id)
     session.commit()
-    service.publish(second.id, actor_user_id=actor.id)
+    service.publish_version(second.id, actor_user_id=actor.id)
     session.commit()
 
-    result = service.restore(
+    result = service.restore_version(
         first.id,
         actor_user_id=actor.id,
         actor_label=actor.username,
@@ -361,12 +361,12 @@ def test_revoked_version_can_be_restored_when_no_newer_version_is_current(
     version = _version(session, fund, 1)
     session.commit()
     service = PublishingService(session)
-    service.publish(version.id, actor_user_id=actor.id)
+    service.publish_version(version.id, actor_user_id=actor.id)
     session.commit()
-    service.revoke(version.id, actor_user_id=actor.id, reason="撤回校验")
+    service.revoke_version(version.id, actor_user_id=actor.id, reason="撤回校验")
     session.commit()
 
-    service.restore(version.id, actor_user_id=actor.id, reason="恢复已确认版本")
+    service.restore_version(version.id, actor_user_id=actor.id, reason="恢复已确认版本")
     session.commit()
 
     assert version.status == ValuationStatus.PUBLISHED
@@ -380,7 +380,7 @@ def test_released_version_details_cannot_be_updated_or_deleted(
     version = _version(session, fund, 1)
     session.commit()
     service = PublishingService(session)
-    service.publish(version.id, actor_user_id=actor.id)
+    service.publish_version(version.id, actor_user_id=actor.id)
     session.commit()
     snapshot = session.scalar(
         select(FundDailySnapshot).where(
@@ -411,7 +411,7 @@ def test_released_version_parent_cannot_be_deleted(session: Session) -> None:
     fund = _fund(session)
     version = _version(session, fund, 1)
     session.commit()
-    PublishingService(session).publish(version.id, actor_user_id=actor.id)
+    PublishingService(session).publish_version(version.id, actor_user_id=actor.id)
     session.commit()
 
     session.delete(version)

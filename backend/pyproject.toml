@@ -35,5 +35,6 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
+where = [".", ".."]
+include = ["app*", "tools*"]
+exclude = ["tools.valuation_inventory.tests*"]

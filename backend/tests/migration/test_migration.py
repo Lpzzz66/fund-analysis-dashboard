@@ -6,13 +6,15 @@ from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from app.migration.inventory import build_inventory, classify_candidates
 from app.migration.manifest import MigrationManifest
 from app.migration.runner import run_migration
 from app.migration.transport import HttpImportTransport, HttpResponse, UploadReceipt
+
+from tools.valuation_inventory.dedup import DedupGroup, DedupResult, GroupMember
+from tools.valuation_inventory.scanner import ScanResult
 
 
 @dataclass(frozen=True)
@@ -42,20 +44,28 @@ class FakeFile:
         return Path(self.rel_path).name
 
 
-def member(rel_path: str) -> SimpleNamespace:
-    return SimpleNamespace(rel_path=rel_path)
+def member(rel_path: str) -> GroupMember:
+    return GroupMember(
+        rel_path=rel_path,
+        zone="primary",
+        file_name=Path(rel_path).name,
+        sha256=None,
+        valuation_date=date(2026, 1, 5),
+    )
 
 
-def group(classification: str, *rel_paths: str, keep: str | None = None):
-    return SimpleNamespace(
+def group(classification: str, *rel_paths: str, keep: str | None = None) -> DedupGroup:
+    return DedupGroup(
+        product="梦一号",
+        valuation_date=date(2026, 1, 5),
         classification=classification,
         members=[member(rel_path) for rel_path in rel_paths],
         keep=keep,
     )
 
 
-def fake_dedup(*groups):
-    return SimpleNamespace(groups=list(groups))
+def fake_dedup(*groups: DedupGroup) -> DedupResult:
+    return DedupResult(groups=list(groups))
 
 
 def test_inventory_adapter_uses_injected_scan_and_dedup(tmp_path: Path) -> None:
@@ -64,9 +74,9 @@ def test_inventory_adapter_uses_injected_scan_and_dedup(tmp_path: Path) -> None:
     files = (FakeFile("梦一号估值表/a.xls"),)
     calls: list[tuple[Path, int]] = []
 
-    def scan(source_root: Path, workers: int) -> SimpleNamespace:
+    def scan(source_root: Path, workers: int) -> ScanResult:
         calls.append((source_root, workers))
-        return SimpleNamespace(files=list(files), root_name=source_root.name)
+        return ScanResult(files=list(files), root_name=source_root.name)
 
     result = build_inventory(
         root,
@@ -199,8 +209,8 @@ def test_resume_retries_failed_file_without_touching_source_and_redacts_report(
         if path.is_file()
     }
 
-    def scan(source_root: Path, workers: int) -> SimpleNamespace:
-        return SimpleNamespace(files=[first, second], root_name=source_root.name)
+    def scan(source_root: Path, workers: int) -> ScanResult:
+        return ScanResult(files=[first, second], root_name=source_root.name)
 
     out = tmp_path / "reports"
     manifest_path = out / "migration-manifest.json"
@@ -276,7 +286,7 @@ def test_dry_run_writes_manifest_and_never_calls_transport(tmp_path: Path) -> No
         out / "report.json",
         dry_run=True,
         transport=ExplodingTransport(),
-        scan_fn=lambda source_root, workers: SimpleNamespace(
+        scan_fn=lambda source_root, workers: ScanResult(
             files=[file_info], root_name=source_root.name
         ),
         dedup_fn=lambda scanned: fake_dedup(),
@@ -310,7 +320,7 @@ def test_gz_only_candidate_is_uploaded_and_completes_batch(tmp_path: Path) -> No
         tmp_path / "reports" / "manifest.json",
         tmp_path / "reports" / "report.json",
         transport=transport,
-        scan_fn=lambda source_root, workers: SimpleNamespace(
+        scan_fn=lambda source_root, workers: ScanResult(
             files=[file_info], root_name=source_root.name
         ),
         dedup_fn=lambda scanned: fake_dedup(),

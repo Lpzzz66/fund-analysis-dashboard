@@ -8,6 +8,8 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 WORKDIR /build
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
+COPY tools/__init__.py ./tools/__init__.py
+COPY tools/valuation_inventory ./tools/valuation_inventory
 
 # Keep pip's download cache in BuildKit's cache mount while keeping it out of
 # the final image.  The runtime image only receives installed dependencies.
@@ -32,6 +34,8 @@ WORKDIR /app/backend
 COPY --from=builder /install /usr/local
 COPY --chown=fundapp:fundapp backend/pyproject.toml ./
 COPY --chown=fundapp:fundapp backend/app ./app
+COPY --chown=fundapp:fundapp tools/__init__.py ./tools/__init__.py
+COPY --chown=fundapp:fundapp tools/valuation_inventory ./tools/valuation_inventory
 COPY --chown=fundapp:fundapp backend/alembic.ini ./
 COPY --chown=fundapp:fundapp backend/alembic ./alembic
 

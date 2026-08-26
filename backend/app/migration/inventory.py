@@ -7,13 +7,16 @@ into migration actions for the official import service.
 
 from __future__ import annotations
 
-import importlib
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+from tools.valuation_inventory import dedup, scanner
+from tools.valuation_inventory.dedup import DedupGroup, DedupResult
+from tools.valuation_inventory.models import FileInfo
+from tools.valuation_inventory.scanner import ScanOptions, ScanResult
 
 ACTION_IMPORT = "import"
 ACTION_IMPORT_GZ_ONLY = "import_gz_only"
@@ -69,12 +72,12 @@ class InventorySnapshot:
     """The scanner output and its existing deduplication result."""
 
     root_name: str
-    files: tuple[Any, ...]
-    dedup_result: Any
+    files: tuple[FileInfo, ...]
+    dedup_result: DedupResult
 
 
-ScanFunction = Callable[[Path, int], Any]
-DedupFunction = Callable[[list[Any]], Any]
+ScanFunction = Callable[[Path, int], ScanResult]
+DedupFunction = Callable[[list[FileInfo]], DedupResult]
 
 
 def build_inventory(
@@ -93,7 +96,7 @@ def build_inventory(
         raise ValueError("workers must be at least 1")
 
     scanner_result = (scan_fn or _scan_with_existing_tool)(source_root, workers)
-    files = tuple(sorted(getattr(scanner_result, "files", ()), key=_rel_path))
+    files = tuple(sorted(scanner_result.files, key=lambda info: info.rel_path))
     dedup_result = (dedup_fn or _dedup_with_existing_tool)(list(files))
     return InventorySnapshot(
         root_name=source_root.name,
@@ -103,24 +106,22 @@ def build_inventory(
 
 
 def classify_candidates(
-    files: list[Any] | tuple[Any, ...], dedup_result: Any
+    files: list[FileInfo] | tuple[FileInfo, ...], dedup_result: DedupResult
 ) -> tuple[MigrationCandidate, ...]:
     """Apply the existing product/date/hash and primary-first migration rules."""
 
-    by_rel = {_rel_path(info): info for info in files}
+    by_rel = {info.rel_path: info for info in files}
     candidates: dict[str, MigrationCandidate] = {}
     grouped_rels: set[str] = set()
 
-    for dedup_group in sorted(
-        getattr(dedup_result, "groups", ()), key=_dedup_group_sort_key
-    ):
+    for dedup_group in sorted(dedup_result.groups, key=_dedup_group_sort_key):
         member_rels = sorted(
             member.rel_path
-            for member in getattr(dedup_group, "members", ())
+            for member in dedup_group.members
             if member.rel_path in by_rel
         )
         grouped_rels.update(member_rels)
-        classification = getattr(dedup_group, "classification", "")
+        classification = dedup_group.classification
         if classification == CLASS_SAME_DATE_CONFLICT:
             note = "same_date_conflict: " + ";".join(member_rels)
             for rel_path in member_rels:
@@ -130,11 +131,11 @@ def classify_candidates(
             continue
 
         if classification == CLASS_SAME_CONTENT:
-            keep = getattr(dedup_group, "keep", None)
+            keep = dedup_group.keep
             for rel_path in member_rels:
                 if rel_path == keep:
                     info = by_rel[rel_path]
-                    zone = _enum_value(getattr(info, "zone", "other"))
+                    zone = enum_or_string_value(info.zone)
                     action = (
                         ACTION_IMPORT if zone == "primary" else ACTION_IMPORT_GZ_ONLY
                     )
@@ -159,35 +160,35 @@ def classify_candidates(
             )
 
     for info in files:
-        rel_path = _rel_path(info)
+        rel_path = info.rel_path
         if rel_path in grouped_rels:
             continue
-        if not getattr(info, "is_valuation", False):
-            file_type = _enum_value(getattr(info, "file_type", "unknown"))
+        if not info.is_valuation:
+            file_type = enum_or_string_value(info.file_type)
             candidates[rel_path] = _candidate(
                 info,
                 ACTION_SKIP_NON_VALUATION,
                 note=f"not a valuation file: {file_type}",
             )
             continue
-        if getattr(info, "identity_conflict", False):
+        if info.identity_conflict:
             candidates[rel_path] = _candidate(
                 info, ACTION_NEEDS_REVIEW, note="identity_conflict"
             )
             continue
-        if not getattr(info, "product", None):
+        if not info.product:
             candidates[rel_path] = _candidate(
                 info, ACTION_NEEDS_REVIEW, note="no_product"
             )
             continue
-        if not getattr(info, "valuation_date", None):
+        if not info.valuation_date:
             candidates[rel_path] = _candidate(info, ACTION_NEEDS_REVIEW, note="no_date")
             continue
-        if not getattr(info, "sha256", None):
+        if not info.sha256:
             candidates[rel_path] = _candidate(info, ACTION_NEEDS_REVIEW, note="no_hash")
             continue
 
-        zone = _enum_value(getattr(info, "zone", "other"))
+        zone = enum_or_string_value(info.zone)
         if zone == "primary":
             action = ACTION_IMPORT
             note = "primary source"
@@ -203,26 +204,25 @@ def classify_candidates(
 
 
 def _candidate(
-    info: Any,
+    info: FileInfo,
     action: str,
     *,
     duplicate_of: str | None = None,
     note: str = "",
 ) -> MigrationCandidate:
-    valuation_date = getattr(info, "valuation_date", None)
     return MigrationCandidate(
-        rel_path=_rel_path(info),
-        product=getattr(info, "product", None),
-        valuation_date=valuation_date,
-        sha256=getattr(info, "sha256", None),
-        size_bytes=getattr(info, "size_bytes", -1),
-        source_zone=_enum_value(getattr(info, "zone", "other")),
-        file_type=_enum_value(getattr(info, "file_type", "unknown")),
-        is_valuation=bool(getattr(info, "is_valuation", False)),
+        rel_path=info.rel_path,
+        product=info.product,
+        valuation_date=info.valuation_date,
+        sha256=info.sha256,
+        size_bytes=info.size_bytes,
+        source_zone=enum_or_string_value(info.zone),
+        file_type=enum_or_string_value(info.file_type),
+        is_valuation=info.is_valuation,
         action=action,
         duplicate_of=duplicate_of,
         note=note,
-        error_message=getattr(info, "error_message", "") or "",
+        error_message=info.error_message,
     )
 
 
@@ -236,26 +236,24 @@ def _candidate_sort_key(candidate: MigrationCandidate) -> tuple[str, str, int, s
     )
 
 
-def _dedup_group_sort_key(group: Any) -> tuple[str, str, str]:
-    members = sorted(member.rel_path for member in getattr(group, "members", ()))
+def _dedup_group_sort_key(group: DedupGroup) -> tuple[str, str, str]:
+    members = sorted(member.rel_path for member in group.members)
     return (
-        getattr(group, "product", "") or "",
-        getattr(group, "valuation_date", date.min).isoformat(),
+        group.product,
+        group.valuation_date.isoformat(),
         members[0] if members else "",
     )
 
 
-def _rel_path(info: Any) -> str:
-    return str(info.rel_path)
+def enum_or_string_value(value: object) -> str:
+    """Read an inventory enum value while keeping injected test doubles simple."""
+
+    enum_value = getattr(value, "value", None)
+    return str(value if enum_value is None else enum_value)
 
 
-def _enum_value(value: Any) -> str:
-    return str(getattr(value, "value", value))
-
-
-def _scan_with_existing_tool(root: Path, workers: int) -> Any:
-    scanner, _ = _load_existing_inventory_modules()
-    options = scanner.ScanOptions(
+def _scan_with_existing_tool(root: Path, workers: int) -> ScanResult:
+    options = ScanOptions(
         parse_xls=True,
         parse_xlsx=True,
         workers=workers,
@@ -263,29 +261,5 @@ def _scan_with_existing_tool(root: Path, workers: int) -> Any:
     return scanner.scan(root, options)
 
 
-def _dedup_with_existing_tool(files: list[Any]) -> Any:
-    _, dedup = _load_existing_inventory_modules()
+def _dedup_with_existing_tool(files: list[FileInfo]) -> DedupResult:
     return dedup.analyze(files)
-
-
-def _load_existing_inventory_modules() -> tuple[Any, Any]:
-    """Load the repository inventory package even when the CLI runs from backend/."""
-
-    try:
-        scanner = importlib.import_module("tools.valuation_inventory.scanner")
-        dedup = importlib.import_module("tools.valuation_inventory.dedup")
-        return scanner, dedup
-    except ModuleNotFoundError as exc:
-        if exc.name not in {"tools", "tools.valuation_inventory"}:
-            raise
-
-    project_root = Path(__file__).resolve().parents[3]
-    project_root_text = str(project_root)
-    sys.path.insert(0, project_root_text)
-    try:
-        scanner = importlib.import_module("tools.valuation_inventory.scanner")
-        dedup = importlib.import_module("tools.valuation_inventory.dedup")
-        return scanner, dedup
-    finally:
-        if sys.path and sys.path[0] == project_root_text:
-            sys.path.pop(0)

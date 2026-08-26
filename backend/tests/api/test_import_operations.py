@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
-
 from app.db.base import ImportBatchStatus, JobStatus, SourceType
 from app.db.models import (
     AuditLog,
@@ -10,6 +8,7 @@ from app.db.models import (
     ImportBatchFile,
     SourceFile,
 )
+from sqlalchemy.orm import Session
 
 from ..imports.conftest import make_xlsx_bytes
 

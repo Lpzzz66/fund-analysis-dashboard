@@ -3,13 +3,12 @@ from __future__ import annotations
 from datetime import date
 from io import BytesIO
 
-from fastapi.testclient import TestClient
-from openpyxl import Workbook
-from sqlalchemy.orm import Session
-
 from app.db.base import ValuationStatus
 from app.db.models import Fund, ValuationVersion
 from app.imports.tasks import process_next_job
+from fastapi.testclient import TestClient
+from openpyxl import Workbook
+from sqlalchemy.orm import Session
 
 
 def _valuation_xlsx() -> bytes:
@@ -67,7 +66,13 @@ def test_upload_worker_publish_and_dashboard_read(admin_client, app_and_engine) 
     batch_id = batch_response.json()["data"]["id"]
     uploaded = admin_client.post(
         f"/api/v1/imports/{batch_id}/files",
-        files={"file": ("千金一号.xlsx", _valuation_xlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={
+            "file": (
+                "千金一号.xlsx",
+                _valuation_xlsx(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert uploaded.status_code == 201
     assert admin_client.post(f"/api/v1/imports/{batch_id}/complete").status_code == 200
@@ -103,9 +108,7 @@ def test_viewer_cannot_write_or_publish(admin_client, app_and_engine) -> None:
         )
 
         assert (
-            viewer.post(
-                "/api/v1/funds", json={"standard_name": "禁止产品"}
-            ).status_code
+            viewer.post("/api/v1/funds", json={"standard_name": "禁止产品"}).status_code
             == 403
         )
         assert (
