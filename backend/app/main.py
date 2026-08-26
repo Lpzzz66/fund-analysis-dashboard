@@ -4,10 +4,13 @@ from fastapi import FastAPI
 
 from .api.auth import router as auth_router
 from .api.auth import user_router
+from .api.catalog import router as catalog_router
 from .api.dashboard import router as dashboard_router
 from .api.imports import router as imports_router
 from .api.mail import router as mail_router
 from .api.reviews import router as reviews_router
+from .api.risk import router as risk_router
+from .api.system import router as system_router
 from .config import get_settings
 from .db.session import create_engine
 
@@ -25,6 +28,9 @@ def create_app() -> FastAPI:
     app.include_router(mail_router)
     app.include_router(dashboard_router)
     app.include_router(reviews_router)
+    app.include_router(catalog_router)
+    app.include_router(risk_router)
+    app.include_router(system_router)
 
     @app.get("/health/live", tags=["health"])
     def health_live() -> dict[str, str]:

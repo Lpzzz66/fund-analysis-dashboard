@@ -47,6 +47,7 @@ class SystemState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settings: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class UserSession(Base):

@@ -135,4 +135,9 @@ class RiskEvent(Base):
     )
     handling_note: Mapped[str | None] = mapped_column(Text)
     evidence_snapshot: Mapped[str | None] = mapped_column(Text)
+    handled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_account.id", ondelete="SET NULL"), index=True
+    )
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence_reference: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = created_at_column()

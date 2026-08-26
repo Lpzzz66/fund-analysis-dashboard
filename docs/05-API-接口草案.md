@@ -124,6 +124,21 @@
 
 停用需要原因，不删除历史数据。
 
+产品主数据维护已实现：`admin`（管理员）和 `operator`（业务员）可新增、修改、启用和停用产品；`viewer`（普通看板）不能调用维护接口。产品名称、产品代码和别名冲突统一返回 409（冲突），别名按 `strip + casefold`（去首尾空白并忽略大小写）判断，停用只改变产品状态并保留历史估值版本。
+
+产品别名和份额类别维护接口如下：
+
+- `GET /api/v1/funds/{fund_id}/aliases`（别名列表）。
+- `POST /api/v1/funds/{fund_id}/aliases`（新增别名）。
+- `PATCH /api/v1/funds/{fund_id}/aliases/{alias_id}`（修改别名）。
+- `DELETE /api/v1/funds/{fund_id}/aliases/{alias_id}`（删除别名，仅影响主数据）。
+- `GET /api/v1/funds/{fund_id}/share-classes`（份额类别主数据列表）。
+- `POST /api/v1/funds/{fund_id}/share-classes`（新增份额类别）。
+- `PATCH /api/v1/funds/{fund_id}/share-classes/{share_class_id}`（修改份额类别）。
+- `POST /api/v1/funds/{fund_id}/share-classes/{share_class_id}/disable|enable`（停用或恢复份额类别）。
+
+份额类别的 `disabled_from`（停用日期）派生 `status`（状态）；这些操作不会删除估值版本中的份额快照。
+
 ### `GET /api/v1/funds/{fund_id}/overview`（产品概览）
 
 参数：估值日、区间、净值序列类型。
@@ -195,7 +210,7 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 - `GET /api/v1/reviews`、`POST /api/v1/reviews/{version_id}/acknowledge`（复核队列和复核决定）。
 - `POST /api/v1/valuations/{version_id}/publish|reject|revoke|restore`（版本生命周期操作）。
 
-看板查询只读取 `published`（已发布）版本；未发布、待复核、已替代和已撤回版本不会进入看板结果。当前分析结果仍按请求即时计算，尚未持久化公司指标和风险事件。
+看板查询只读取 `published`（已发布）版本；未发布、待复核、已替代和已撤回版本不会进入看板结果。当前产品/公司指标仍按请求即时计算；风险事件表和规则维护接口已具备，但 evaluator（规则计算器）尚未由发布任务自动触发写入风险事件。
 
 导入任务状态返回尝试次数、租约时间、结束时间、错误编号和是否可重试。独立 worker（任务进程）通过 `python -m app.worker` 串行领取数据库任务；领取使用独立短事务，解析业务写入若发现租约已失效会整体回滚，旧 worker 不能提交结果。
 
@@ -243,21 +258,29 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 
 ### `GET /api/v1/risk/events`（风险事件）
 
-参数：产品、规则、严重度、状态、日期和分页。
+权限：登录用户可读。参数：`fund_id`（产品）、`rule_code`（规则编码）、`severity`（严重度）、`status`（状态）、`start`/`end`（估值日期范围）和分页。
 
-### `POST /api/v1/risk/events/{event_id}/resolve`（处理风险事件）
+### `GET /api/v1/risk/rules`（风险规则）
 
-请求：处理意见、处置状态、附件或证据引用。
+默认返回每个 `rule_code`（规则编码）的最新版本；传 `include_history=true`（包含历史）返回全部版本。支持 `rule_code`、`enabled` 和分页筛选。
+
+### `POST /api/v1/risk/rules`（新增风险规则）
+
+权限：`admin`（系统管理员）或 `operator`（业务员）。请求包括 `rule_code`、`rule_type`、`scope`、`threshold`、`severity`、有效期和 `enabled`。`rule_type` 只支持 evaluator（规则计算器）已有的日收益、回撤、单票权重、前五大权重和集中度规则；不接入外部行情能力。
+
+### `PATCH /api/v1/risk/rules/{rule_id}`（创建规则新版本）
+
+权限：`admin`（系统管理员）或 `operator`（业务员）。不就地修改原记录，自动为同一规则编码生成递增数字版本；旧版本和既有风险事件保留。启用/停用同样通过新版本表达。
+
+### `POST /api/v1/risk/events/{event_id}/resolve` 或 `/handle`（处理风险事件）
+
+权限：`admin`（系统管理员）或 `operator`（业务员）。请求必须包含 `status`（只能为 `acknowledged`（已确认）、`resolved`（已解决）或 `ignored`（已忽略））和 `handling_note`（处理意见），可带 `evidence_reference`（证据引用）。服务端记录处理人、处理时间并写审计；不存在事件返回 404，非法状态返回 422。
 
 ## 6. 邮件接口
 
 ### `GET /api/v1/mail/settings`（邮箱设置）
 
-只返回是否已配置、服务器和端口，不返回授权码。
-
-### `PUT /api/v1/mail/settings`（保存邮箱设置）
-
-权限：系统管理员。授权码从请求进入服务端后只保存加密值或安全配置引用。
+只返回 `configured`（是否已配置）、服务器、端口和用户名等非敏感状态，不返回授权码。邮箱设置只从环境变量或受控密钥文件读取；本期不提供写入数据库的 `PUT` 接口。
 
 ### `POST /api/v1/mail/test-connection`（测试连接）
 
@@ -276,13 +299,20 @@ Task 4（任务四）已实现的路径使用 `batch_id`（批次编号）：
 ## 7. 配置、账号和审计接口
 
 - `GET/POST/PATCH /api/v1/subjects/mappings`（科目映射查询和维护）。
-- `GET/POST/PATCH /api/v1/risk/rules`（风险规则查询和维护）。
+- `POST /api/v1/subjects/mappings/{mapping_id}/disable`（停用科目映射，可带停用原因）。
+- `GET/POST /api/v1/risk/rules`、`PATCH /api/v1/risk/rules/{rule_id}`（风险规则查询和版本化维护）。
 - `GET/POST/PATCH /api/v1/users`（账号查询和管理员维护）。
 - `POST /api/v1/users/{user_id}/reset-password`（管理员重置密码）。
 - `POST /api/v1/users/{user_id}/disable`（禁用账号）。
 - `GET /api/v1/audit-logs`（审计查询）。
 - `GET/PATCH /api/v1/system/settings`（系统设置，管理员）。
 - `GET /api/v1/system/health`（健康检查，不返回敏感配置）。
+
+系统设置只允许 `admin`（系统管理员）读取和修改，白名单为 `source_retention_days`（原始文件保留天数，1--3650）、`task_concurrency`（任务并发数，1--16）、`data_lateness_days`（数据迟到容忍天数，0--30）、`mail_sync_interval_minutes`（邮件同步间隔，1--1440）、`backup_retention_days`（备份保留天数，1--3650）和 `timezone`（时区）。返回值同时带 `source`（来源：database/environment/default）。当前数据库配置不热更新，worker（任务进程）和 retention（清理服务）在当前进程仍读取环境配置，响应 `meta.runtime_note`（运行时说明）会明确这一点。
+
+审计查询允许 `admin`（系统管理员）和 `operator`（业务员）只读访问，支持 `actor_user_id`、`action`、`resource_type`、`result`、`start`/`end` 和分页过滤；接口只返回安全摘要并递归剔除密码、令牌、授权码和数据库连接信息，不提供删除接口。
+
+科目映射至少提供科目代码/前缀或原始名称模式之一，支持标准类别、叶子标记、是否纳入持仓、有效期、规则版本和 active/inactive（启用/停用）状态。维护写入统一审计记录，停用映射只影响未来解析，不改写已有 `AccountSubjectDaily`（科目每日快照）。列表支持状态、标准类别和分页筛选。
 
 ## 8. 前端轮询约定
 
