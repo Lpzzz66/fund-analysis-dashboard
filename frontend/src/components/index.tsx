@@ -259,3 +259,56 @@ export function useToast() {
   const { message } = AntdApp.useApp();
   return message;
 }
+
+/* ---------- Truncate: collapse long text in dense table cells ---------- */
+// Renders text in a constrained-width box. Short values stay on one line;
+// values longer than `maxChars` collapse to an ellipsised preview with a
+// toggle link to expand / collapse. JSON values are stringified once and
+// then truncated the same way. Use this anywhere a Table cell could blow
+// out the column width on a single long entry.
+export function Truncate({
+  value,
+  maxChars = 80,
+  className = "",
+}: {
+  value?: string | number | boolean | null | object;
+  maxChars?: number;
+  className?: string;
+}) {
+  const text = (() => {
+    if (value === null || value === undefined || value === "") return "";
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  })();
+  const [expanded, setExpanded] = useState(false);
+  if (!text) return <span className="fd-caption">—</span>;
+  const overflows = text.length > maxChars;
+  if (!overflows) {
+    return (
+      <Tooltip title={text} mouseEnterDelay={0.4}>
+        <span className={`fd-truncate ${className}`.trim()}>{text}</span>
+      </Tooltip>
+    );
+  }
+  const shown = expanded ? text : `${text.slice(0, maxChars)}…`;
+  return (
+    <span className={`fd-truncate ${className}`.trim()}>
+      <Tooltip title={text} mouseEnterDelay={0.4}>
+        <span>{shown}</span>
+      </Tooltip>{" "}
+      <a
+        role="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded((current) => !current);
+        }}
+      >
+        {expanded ? "收起" : "展开"}
+      </a>
+    </span>
+  );
+}

@@ -335,3 +335,23 @@ a:hover {
   font-size: 12px;
   color: var(--text-2);
 }
+
+/* Truncate helper for dense table cells. Combined with a max-width on the
+ * host cell, this keeps long audit-log summaries, file names and validation
+ * messages from blowing the column out to the full viewport width. */
+.fd-truncate {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.fd-truncate > a {
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  margin-left: 4px;
+}
