@@ -299,6 +299,37 @@ def test_message_id_and_attachment_hash_are_idempotent(
         assert session.scalar(select(func.count(SourceFile.id))) == 1
 
 
+def test_known_mailbox_skips_full_message_fetches(
+    admin_client: TestClient,
+    fake_mailbox: FakeMailbox,
+) -> None:
+    """A second sync over a known mailbox must not fetch any RFC822 bodies."""
+
+    fake_mailbox.messages.update(
+        {
+            "1": make_email("<message-1@example.test>", [("one.xlsx", make_xlsx_bytes())]),
+            "2": make_email("<message-2@example.test>", [("two.xlsx", make_xlsx_bytes())]),
+        }
+    )
+
+    first = admin_client.post("/api/v1/mail/sync")
+    assert first.status_code == 200
+    assert first.json()["data"]["messages_imported"] == 2
+
+    full_fetches_before = fake_mailbox.connections[0].bulk_fetch_calls
+    assert full_fetches_before  # bulk header fetch happened on first run
+
+    second = admin_client.post("/api/v1/mail/sync")
+    assert second.status_code == 200
+    data = second.json()["data"]
+    assert data["messages_skipped"] == 2
+    assert data["messages_imported"] == 0
+    # Second connection: only ranged header fetches, no per-UID RFC822 fetch
+    # is needed because every message was pre-screened as known.
+    second_connection = fake_mailbox.connections[-1]
+    assert second_connection.bulk_fetch_calls
+
+
 def test_one_fetch_error_does_not_stop_later_messages(
     admin_client: TestClient,
     fake_mailbox: FakeMailbox,

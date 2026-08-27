@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import imaplib
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -129,3 +130,45 @@ class ImapClient:
             ):
                 return item[1]
         raise MailMessageError("imap_fetch_failed")
+
+    def fetch_headers_bulk(
+        self,
+        connection: Any,
+        uids: list[str],
+        *,
+        chunk_size: int = 500,
+    ) -> dict[str, bytes]:
+        """Fetch Message-ID headers for many UIDs using ranged FETCH commands.
+
+        One round trip covers ``chunk_size`` messages, so scanning a full
+        mailbox takes seconds instead of one network round trip per message.
+        UIDs missing from the server response are simply absent from the
+        returned mapping; callers fall back to per-UID fetch for those.
+        """
+
+        result: dict[str, bytes] = {}
+        for start in range(0, len(uids), chunk_size):
+            chunk = uids[start : start + chunk_size]
+            range_spec = f"{chunk[0]}:{chunk[-1]}"
+            try:
+                status, data = connection.uid(
+                    "fetch", range_spec, "(UID BODY[HEADER.FIELDS (MESSAGE-ID)])"
+                )
+            except Exception as exc:
+                raise MailMessageError("imap_fetch_failed") from exc
+            if status != "OK":
+                raise MailMessageError("imap_fetch_failed")
+            for item in data or []:
+                if not (
+                    isinstance(item, tuple)
+                    and len(item) == 2
+                    and isinstance(item[0], bytes)
+                    and isinstance(item[1], bytes)
+                ):
+                    continue
+                match = re.search(rb"UID (\d+)", item[0])
+                if match is None:
+                    continue
+                uid = match.group(1).decode("ascii", errors="strict")
+                result[uid] = item[1]
+        return result

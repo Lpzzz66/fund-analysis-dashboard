@@ -47,12 +47,26 @@ def make_email(
     return bytes(message)
 
 
+def _message_id_header(raw_message: bytes) -> bytes:
+    """Extract the raw Message-ID header block the way a server would return it."""
+
+    from email.parser import BytesParser
+    from email import policy
+
+    parsed = BytesParser(policy=policy.default).parsebytes(raw_message)
+    message_id = parsed.get("Message-ID")
+    if message_id is None:
+        return b"\r\n"
+    return f"Message-ID: {message_id}\r\n".encode()
+
+
 class FakeConnection:
     def __init__(self, messages: dict[str, bytes | None]) -> None:
         self.messages = messages
         self.logged_in_with: tuple[str, str] | None = None
         self.selected_readonly = False
         self.logged_out = False
+        self.bulk_fetch_calls: list[str] = []
 
     def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
         self.logged_in_with = (username, password)
@@ -68,9 +82,33 @@ class FakeConnection:
             return "OK", [" ".join(self.messages).encode("ascii")]
         if command.upper() == "FETCH":
             uid = str(args[0])
+            if ":" in uid:
+                # Ranged fetch: return Message-ID headers like a real server.
+                self.bulk_fetch_calls.append(uid)
+                start, _, end = uid.partition(":")
+                lo, hi = int(start), int(end)
+                items: list[object] = []
+                for candidate in map(str, range(lo, hi + 1)):
+                    raw = self.messages.get(candidate)
+                    if raw is None:
+                        continue
+                    items.append(
+                        (
+                            f"UID {candidate} BODY[HEADER.FIELDS (MESSAGE-ID)]".encode(),
+                            _message_id_header(raw),
+                        )
+                    )
+                return "OK", items
             raw_message = self.messages[uid]
             if raw_message is None:
                 return "NO", [None]
+            if "BODY[HEADER.FIELDS" in str(args[1]):
+                return "OK", [
+                    (
+                        f"UID {uid} BODY[HEADER.FIELDS (MESSAGE-ID)]".encode(),
+                        _message_id_header(raw_message),
+                    )
+                ]
             return "OK", [(b"RFC822", raw_message)]
         raise AssertionError(command)
 

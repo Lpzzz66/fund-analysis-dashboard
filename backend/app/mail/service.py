@@ -159,14 +159,31 @@ class MailService:
         try:
             with self.client.open() as connection:
                 self.client.select_readonly(connection)
-                for uid in self.client.list_uids(connection):
+                uids = self.client.list_uids(connection)
+                counters.messages_seen = len(uids)
+                # Pre-screen every message with bulk header fetches and one
+                # batched database lookup, so a fully-known mailbox costs a
+                # handful of round trips instead of one per message.
+                external_ids = self._precompute_external_ids(connection, uids)
+                known_ids = self._known_external_ids(
+                    {eid for eid in external_ids.values()}
+                )
+                for uid in uids:
                     if self._cancel_requested(job.id):
                         break
-                    counters.messages_seen += 1
+                    external_id = external_ids.get(uid)
+                    if external_id is not None and external_id in known_ids:
+                        counters.messages_skipped += 1
+                        continue
                     try:
                         with self.session.begin_nested():
                             outcome = self._process_uid(
-                                connection, uid, run_id, actor_user_id, counters
+                                connection,
+                                uid,
+                                run_id,
+                                actor_user_id,
+                                counters,
+                                external_id=external_id,
                             )
                         if outcome == "skipped":
                             counters.messages_skipped += 1
@@ -286,6 +303,45 @@ class MailService:
             )
         )
 
+    def _precompute_external_ids(
+        self, connection: Any, uids: list[str]
+    ) -> dict[str, str]:
+        """Bulk-fetch Message-ID headers and map each UID to its external id."""
+
+        external_ids: dict[str, str] = {}
+        if not uids:
+            return external_ids
+        try:
+            header_map = self.client.fetch_headers_bulk(connection, uids)
+        except MailMessageError:
+            header_map = {}
+        for uid in uids:
+            raw_headers = header_map.get(uid)
+            if raw_headers is None:
+                # UID missing from the bulk response; per-UID fetch in
+                # _process_uid keeps the message correct.
+                continue
+            external_ids[uid] = self._extract_message_id_from_headers(
+                raw_headers, uid
+            )
+        return external_ids
+
+    def _known_external_ids(self, candidates: set[str]) -> set[str]:
+        """Return which candidate external ids already exist in the database."""
+
+        known: set[str] = set()
+        ordered = sorted(candidates)
+        for start in range(0, len(ordered), 500):
+            chunk = ordered[start : start + 500]
+            known.update(
+                self.session.scalars(
+                    select(SourceMessage.external_message_id).where(
+                        SourceMessage.external_message_id.in_(chunk)
+                    )
+                )
+            )
+        return known
+
     def _process_uid(
         self,
         connection: Any,
@@ -293,29 +349,32 @@ class MailService:
         run_id: str,
         actor_user_id: int,
         counters: _SyncCounters,
+        *,
+        external_id: str | None = None,
     ) -> str:
-        # Phase 1: lightweight header-only fetch for deduplication
-        try:
-            raw_headers = self.client.fetch_headers(connection, uid)
-        except MailMessageError:
-            counters.failed_messages += 1
-            counters.errors.append("message_fetch_failed")
-            self._record_audit(
-                action="mail.message_failed",
-                resource_type="mail_sync",
-                resource_id=run_id,
-                actor_user_id=actor_user_id,
-                summary={"error_code": "message_fetch_failed", "uid": uid},
-                result=AuditResult.FAILURE,
-            )
-            return "failed"
-        external_id = self._extract_message_id_from_headers(raw_headers, uid)
-        if self.session.scalar(
-            select(SourceMessage.id).where(
-                SourceMessage.external_message_id == external_id
-            )
-        ):
-            return "skipped"
+        # Phase 1: lightweight header fetch, only when not precomputed in bulk
+        if external_id is None:
+            try:
+                raw_headers = self.client.fetch_headers(connection, uid)
+            except MailMessageError:
+                counters.failed_messages += 1
+                counters.errors.append("message_fetch_failed")
+                self._record_audit(
+                    action="mail.message_failed",
+                    resource_type="mail_sync",
+                    resource_id=run_id,
+                    actor_user_id=actor_user_id,
+                    summary={"error_code": "message_fetch_failed", "uid": uid},
+                    result=AuditResult.FAILURE,
+                )
+                return "failed"
+            external_id = self._extract_message_id_from_headers(raw_headers, uid)
+            if self.session.scalar(
+                select(SourceMessage.id).where(
+                    SourceMessage.external_message_id == external_id
+                )
+            ):
+                return "skipped"
 
         # Phase 2: full message fetch only for new messages
         try:
