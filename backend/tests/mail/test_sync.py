@@ -44,6 +44,22 @@ def test_settings_are_redacted_and_test_connection_uses_database_dependency(
     assert fake_mailbox.connections[-1].logged_out is True
 
 
+def test_connection_timeout_returns_safe_diagnostic(
+    admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout_factory(_settings: object) -> object:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(
+        admin_client.app.state, "mail_connection_factory", timeout_factory
+    )
+    response = admin_client.post("/api/v1/mail/test-connection")
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "mail_connection_timeout"}
+
+
 def test_admin_can_update_mail_username_and_it_is_used_by_settings(
     admin_client: TestClient,
     fake_mailbox: FakeMailbox,

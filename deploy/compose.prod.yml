@@ -69,6 +69,7 @@ services:
       - "8000"
     networks:
       - backend
+      - egress
     depends_on:
       db:
         condition: service_healthy
@@ -117,6 +118,7 @@ services:
         read_only: true
     networks:
       - backend
+      - egress
     depends_on:
       db:
         condition: service_healthy
@@ -180,6 +182,8 @@ volumes:
 networks:
   edge:
     name: ${COMPOSE_PROJECT_NAME:-fund-dashboard}-edge
+  egress:
+    name: ${COMPOSE_PROJECT_NAME:-fund-dashboard}-egress
   backend:
     name: ${COMPOSE_PROJECT_NAME:-fund-dashboard}-backend
     internal: true

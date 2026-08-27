@@ -59,12 +59,19 @@ export interface ImportBatchDetail extends ImportBatch { files: ImportBatchFile[
 export interface ImportValidationFinding {
   rule_code: string; level: import("@/utils/constants").ValidationLevel; actual_value: string | null;
   expected_value: string | null; difference: string | null; source_location: string | null; message: string;
+  ignored?: boolean; ignored_at?: string | null; ignored_reason?: string | null;
 }
 export interface ImportValidationVersion {
   version_id: number; fund_id: number; valuation_date: string;
   status: import("@/utils/constants").ValuationStatus; findings: ImportValidationFinding[];
 }
-export interface ReviewItem { id: number; fund_id: number; fund_name: string; valuation_date: string; version_no: number; status: import("@/utils/constants").ValuationStatus; critical_count: number; warning_count: number; }
+export interface ReviewItem {
+  id: number; fund_id: number; fund_name: string; valuation_date: string; version_no: number;
+  status: import("@/utils/constants").ValuationStatus; critical_count: number; warning_count: number;
+  ignored_count: number; source_file_id: number | null; source_filename: string | null;
+  source_file_hash: string | null; source_file_size: number | null; import_batch_id: number | null;
+  findings: ImportValidationFinding[];
+}
 export interface MailSettings {
   host: string; port: number; username: string; configured: boolean; credential_source: string;
   credential_writable: boolean; auto_sync_enabled: boolean;

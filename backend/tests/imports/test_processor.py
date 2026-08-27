@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
@@ -7,6 +8,9 @@ from app.auth.service import AuthService
 from app.db.base import SourceType, ValuationStatus
 from app.db.models import (
     AccountSubjectDaily,
+    AnalysisRun,
+    AuditLog,
+    BackgroundJob,
     Fund,
     FundAlias,
     FundDailySnapshot,
@@ -28,13 +32,17 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 
-def _valuation_xlsx() -> bytes:
+def _valuation_xlsx(
+    *,
+    valuation_date: str = "2026-08-25",
+    missing_share_assets: bool = False,
+) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "估值表"
     sheet.append(["证券投资基金估值表"])
     sheet.append(["千金一号___专用表"])
-    sheet.append(["估值日期：2026-08-25"])
+    sheet.append([f"估值日期：{valuation_date}"])
     sheet.append(
         [
             "科目代码",
@@ -88,6 +96,38 @@ def _valuation_xlsx() -> bytes:
             "",
         ]
     )
+    if missing_share_assets:
+        missing_share_code = "XY0002千金一号B类"
+        sheet.append(
+            [
+                f"基金资产净值:{missing_share_code}",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                None,
+                "",
+                "",
+                "",
+            ]
+        )
+        sheet.append(
+            [
+                f"实收资本:{missing_share_code}",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                20,
+                "",
+                "",
+                "",
+            ]
+        )
     sheet.append(["基金单位净值", 1])
     sheet.append([f"基金单位净值:{share_code}", 1])
     sheet.append(["累计单位净值", 1])
@@ -131,7 +171,9 @@ def test_processor_persists_version_snapshot_positions_and_validation(
         assert result.processed_files == 1
         assert result.created_versions
         version = session.get(ValuationVersion, result.created_versions[0])
-        assert version.status == ValuationStatus.PUBLISHABLE
+        assert version.status == ValuationStatus.PUBLISHED
+        assert result.published_files == 1
+        assert len(result.analysis_run_ids) == 1
         snapshot = session.scalar(
             select(FundDailySnapshot).where(
                 FundDailySnapshot.valuation_version_id == version.id
@@ -166,6 +208,95 @@ def test_processor_persists_version_snapshot_positions_and_validation(
         assert subject.source_row == 8
         assert share_snapshot.paid_in_capital == 80
         assert share_snapshot.daily_return == Decimal("0.01010101")
+
+
+def test_processor_keeps_critical_version_for_manual_review(
+    app_and_engine: tuple[object, object],
+) -> None:
+    app, engine = app_and_engine
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        fund = Fund(standard_name="千金一号")
+        session.add(fund)
+        session.flush()
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+        service.receive_upload(
+            batch.id,
+            "千金一号 08月25日.xlsx",
+            BytesIO(_valuation_xlsx(missing_share_assets=True)),
+            actor.id,
+        )
+        service.complete_batch(batch.id, actor.id)
+        session.commit()
+
+        result = process_import_batch(session, batch.id, app.state.settings)
+        session.commit()
+
+        version = session.get(ValuationVersion, result.created_versions[0])
+        assert version is not None
+        assert version.status == ValuationStatus.PENDING_REVIEW
+        assert result.published_files == 0
+        assert result.analysis_run_ids == ()
+
+
+def test_processor_coalesces_clean_publications_by_fund(
+    app_and_engine: tuple[object, object],
+) -> None:
+    app, engine = app_and_engine
+    with Session(engine) as session:
+        actor = AuthService(session).initialize_admin("admin", "correct horse").user
+        fund = Fund(standard_name="千金一号")
+        session.add(fund)
+        session.flush()
+        service = ImportService.from_settings(session, app.state.settings)
+        batch = service.create_batch(SourceType.UPLOAD, actor.id)
+        for day in ("2026-08-25", "2026-08-26"):
+            service.receive_upload(
+                batch.id,
+                f"千金一号 {day}.xlsx",
+                BytesIO(_valuation_xlsx(valuation_date=day)),
+                actor.id,
+            )
+        service.complete_batch(batch.id, actor.id)
+        session.commit()
+
+        result = process_import_batch(session, batch.id, app.state.settings)
+        session.commit()
+
+        versions = session.scalars(
+            select(ValuationVersion).order_by(ValuationVersion.valuation_date)
+        ).all()
+        runs = session.scalars(select(AnalysisRun)).all()
+        jobs = session.scalars(
+            select(BackgroundJob).where(
+                BackgroundJob.job_type == "process_analysis_run"
+            )
+        ).all()
+        publication_audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "valuation.published")
+        ).all()
+
+        assert result.published_files == 2
+        assert [version.status for version in versions] == [
+            ValuationStatus.PUBLISHED,
+            ValuationStatus.PUBLISHED,
+        ]
+        assert [version.published_by for version in versions] == [
+            "system:auto-import",
+            "system:auto-import",
+        ]
+        assert len(runs) == len(jobs) == len(result.analysis_run_ids) == 1
+        assert runs[0].input_start_date == date(2026, 8, 25)
+        assert runs[0].input_end_date == date(2026, 8, 26)
+        assert runs[0].input_version_range == (
+            f"fund:{fund.id};dates:2026-08-25..2026-08-26"
+        )
+        assert len(publication_audits) == 2
+        assert all(
+            audit.summary["analysis_scheduled"] is False
+            for audit in publication_audits
+        )
 
 
 def test_processor_treats_non_valuation_workbook_as_ignored(

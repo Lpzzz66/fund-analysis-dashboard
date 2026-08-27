@@ -305,7 +305,7 @@ quality_status, analysis_status, analysis_run_id
 
 ### `POST /api/v1/imports/{batch_id}/complete`（完成上传）
 
-无需请求体。服务端确认批次后创建 `process_import_batch`（导入处理）后台任务并返回批次和任务摘要。调用后由 worker 负责解析、标准化和校验。
+无需请求体。服务端确认批次后创建 `process_import_batch`（导入处理）后台任务并返回批次和任务摘要。调用后由 worker 负责解析、标准化和校验。校验同时无 `critical`（阻断级）和 `warning`（警告级）的版本会在该批次处理事务内自动发布；含警告的版本保持 `publishable`，含阻断级发现的版本进入 `pending_review`。批次处理完成后，每个受影响产品最多创建一个覆盖本批次自动发布估值日范围的分析任务。
 
 ### `GET /api/v1/imports`（导入批次列表）
 
@@ -357,7 +357,7 @@ quality_status, analysis_status, analysis_run_id
 {"reason":"可选发布原因","confirm_warnings":true}
 ```
 
-只有 `publishable` 版本可发布。阻断级校验不能发布；存在警告时必须显式 `confirm_warnings: true`。服务端锁定产品、将同产品同估值日旧已发布版本变为 `superseded`（已替代），再发布当前版本，并创建分析任务。
+只有 `publishable` 版本可发布。阻断级校验不能发布；存在警告时必须显式 `confirm_warnings: true`。服务端锁定产品、将同产品同估值日旧已发布版本变为 `superseded`（已替代），再发布当前版本，并创建分析任务。导入批次中的干净版本不需要调用此接口，已由批处理自动发布；本接口主要用于人工确认含警告版本，或其他已进入 `publishable` 状态的版本。
 
 返回：`version_id`、`fund_id`、`valuation_date`、`superseded_version_ids`、`analysis_run_id`。状态冲突和校验不通过返回 `409`。
 
@@ -573,7 +573,7 @@ quality_status, analysis_status, analysis_run_id
 
 ### `POST /api/v1/mail/test-connection`（测试邮箱连接）
 
-仅管理员，无请求体，不导入附件。成功返回 `{"data":{"connected":true}}`；未配置返回 `503`，连接失败返回 `502`。
+仅管理员，无请求体，不导入附件。成功返回 `{"data":{"connected":true}}`。未配置或凭据文件不可读返回 `503`，`detail` 分别为 `mail_not_configured` 或 `mail_credential_unavailable`；连接超时、DNS（域名解析）、TLS（安全连接）或其他连接失败返回 `502`，`detail` 分别为 `mail_connection_timeout`、`mail_dns_failed`、`mail_tls_failed` 或 `mail_connection_failed`。响应和日志都不包含授权码。
 
 ### `POST /api/v1/mail/sync`（立即同步）
 

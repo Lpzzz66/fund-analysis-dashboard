@@ -1,3 +1,8 @@
+from app.db.base import ValidationLevel, ValuationStatus
+from app.db.models import ValidationResult, ValuationVersion
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from .conftest import seed_pending_version
 
 
@@ -35,3 +40,47 @@ def test_review_requires_reason_and_publish_handles_missing_version(
 
     assert missing.status_code == 409
     assert missing_review.status_code == 409
+
+
+def test_manual_publish_ignores_validation_findings(
+    admin_client, app_and_engine
+) -> None:
+    _, version_id = seed_pending_version(app_and_engine[1])
+    with Session(app_and_engine[1]) as session:
+        version = session.get(ValuationVersion, version_id)
+        finding = session.scalar(
+            select(ValidationResult).where(
+                ValidationResult.valuation_version_id == version_id
+            )
+        )
+        assert version is not None
+        assert finding is not None
+        version.status = ValuationStatus.PUBLISHABLE
+        finding.level = ValidationLevel.WARNING
+        session.commit()
+
+    published = admin_client.post(
+        f"/api/v1/valuations/{version_id}/publish",
+        json={"reason": "业务已核对，接受该异常"},
+    )
+
+    assert published.status_code == 200
+    assert published.json()["data"]["validation_ignored_count"] == 1
+
+    review_rows = admin_client.get(
+        "/api/v1/reviews", params={"status": "published"}
+    )
+    assert review_rows.status_code == 200
+    row = review_rows.json()["data"][0]
+    assert row["ignored_count"] == 1
+    assert row["findings"][0]["ignored"] is True
+
+    with Session(app_and_engine[1]) as session:
+        finding = session.scalar(
+            select(ValidationResult).where(
+                ValidationResult.valuation_version_id == version_id
+            )
+        )
+        assert finding is not None
+        assert finding.ignored is True
+        assert finding.ignored_reason == "业务已核对，接受该异常"

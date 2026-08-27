@@ -116,7 +116,8 @@ def _snapshot(session: Session, version_id: int) -> FundDailySnapshot | None:
 def _quality_status(session: Session, version_id: int) -> str:
     levels = session.scalars(
         select(ValidationResult.level).where(
-            ValidationResult.valuation_version_id == version_id
+            ValidationResult.valuation_version_id == version_id,
+            ValidationResult.ignored.is_(False),
         )
     ).all()
     if any(str(level) == "critical" for level in levels):
@@ -244,6 +245,7 @@ def _version_views(
             .where(
                 ValidationResult.valuation_version_id.in_(version_ids),
                 ValidationResult.level.in_(("critical", "warning")),
+                ValidationResult.ignored.is_(False),
             )
             .distinct()
         )
@@ -736,6 +738,7 @@ def quality(
     findings = session.scalars(
         select(ValidationResult)
         .where(ValidationResult.valuation_version_id == version.id)
+        .where(ValidationResult.ignored.is_(False))
         .order_by(ValidationResult.level, ValidationResult.id)
     ).all()
     return {

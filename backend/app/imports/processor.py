@@ -30,6 +30,7 @@ from app.db.models import (
 from app.parser import ValuationParser
 from app.parser.interface import ParsedShareClass, ParsedSubject, ParsedValuation
 from app.parser.valuation_parser import ParseError
+from app.publishing import PublishingService
 from app.validation import ValidationService
 
 from .storage import resolve_in_root
@@ -43,6 +44,8 @@ class BatchProcessResult:
     non_valuation_files: int
     failed_files: int
     review_files: int
+    published_files: int
+    analysis_run_ids: tuple[int, ...]
     created_versions: tuple[int, ...]
 
 
@@ -91,8 +94,10 @@ def process_import_batch(
         "non_valuation": 0,
         "failed": 0,
         "review": 0,
+        "published": 0,
     }
     created_versions: list[int] = []
+    auto_published_by_fund: dict[int, list[ValuationVersion]] = {}
 
     for link in links:
         source_file = session.get(SourceFile, link.source_file_id)
@@ -166,8 +171,32 @@ def process_import_batch(
         report = ValidationService(session).validate_version(version.id, parsed=parsed)
         if report.critical_count:
             counters["review"] += 1
+        elif report.warning_count == 0:
+            PublishingService(session).publish_version(
+                version.id,
+                actor_user_id=batch.created_by_user_id,
+                actor_label="system:auto-import",
+                reason="自动发布：导入校验通过",
+                schedule_analysis=False,
+            )
+            auto_published_by_fund.setdefault(fund.id, []).append(version)
+            counters["published"] += 1
         created_versions.append(version.id)
         counters["processed"] += 1
+
+    analysis_run_ids: list[int] = []
+    publisher = PublishingService(session)
+    for fund_versions in auto_published_by_fund.values():
+        dates = [version.valuation_date for version in fund_versions]
+        latest = max(fund_versions, key=lambda version: (version.valuation_date, version.id))
+        analysis_run = publisher.queue_analysis_run(
+            latest.id,
+            start_date=min(dates),
+            end_date=max(dates),
+            actor_user_id=batch.created_by_user_id,
+            trigger_reason="import_batch_auto_published",
+        )
+        analysis_run_ids.append(analysis_run.id)
 
     batch.status = ImportBatchStatus.COMPLETED
     batch.ended_at = datetime.now(UTC)
@@ -179,6 +208,8 @@ def process_import_batch(
         non_valuation_files=counters["non_valuation"],
         failed_files=counters["failed"],
         review_files=counters["review"],
+        published_files=counters["published"],
+        analysis_run_ids=tuple(analysis_run_ids),
         created_versions=tuple(created_versions),
     )
 

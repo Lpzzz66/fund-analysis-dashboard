@@ -404,4 +404,7 @@ def _validation_data(finding: ValidationResult) -> dict[str, object]:
         else None,
         "source_location": finding.source_location,
         "message": finding.message,
+        "ignored": finding.ignored,
+        "ignored_at": finding.ignored_at.isoformat() if finding.ignored_at else None,
+        "ignored_reason": finding.ignored_reason,
     }

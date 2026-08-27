@@ -98,6 +98,12 @@ class ValidationResult(Base):
     difference: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
     source_location: Mapped[str | None] = mapped_column(String(500))
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ignored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ignored_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_account.id", ondelete="SET NULL")
+    )
+    ignored_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()
 
 

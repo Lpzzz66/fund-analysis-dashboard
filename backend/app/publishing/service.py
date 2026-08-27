@@ -59,7 +59,8 @@ class PublicationResult:
     fund_id: int
     valuation_date: date
     superseded_version_ids: tuple[int, ...]
-    analysis_run_id: int
+    analysis_run_id: int | None
+    validation_ignored_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ def _protect_released_version_details(
         if (
             version is not None
             and ValuationStatus(version.status) in IMMUTABLE_VERSION_STATUSES
+            and version_id not in session.info.get(RELEASED_VERSION_MUTATION_KEY, set())
         ):
             raise PublishedVersionImmutableError(
                 "published_version_details_are_immutable"
@@ -278,8 +280,15 @@ class PublishingService:
         reason: str | None = None,
         confirm_warnings: bool = False,
         actor_label: str | None = None,
+        schedule_analysis: bool = True,
+        ignore_validations: bool = False,
     ) -> PublicationResult:
-        """Publish a validated version and supersede the current released version."""
+        """Publish a validated version and supersede the current released version.
+
+        ``ignore_validations`` is reserved for an explicit human publication
+        decision. It records the waiver on each finding and in the audit log so
+        the exception is not raised again by quality or review views.
+        """
 
         try:
             with self.session.begin_nested():
@@ -289,6 +298,7 @@ class PublishingService:
                 self._ensure_publish_validation(
                     version,
                     confirm_warnings=confirm_warnings,
+                    ignore_validations=ignore_validations,
                 )
                 superseded = self._supersede_current(
                     version, actor_user_id=actor_user_id
@@ -300,10 +310,25 @@ class PublishingService:
                         actor_user_id
                     )
                     version.release_reason = (
-                        _optional_reason(reason) or version.release_reason
+                        _optional_reason(reason)
+                        or version.release_reason
+                        or ("人工发布并忽略校验异常" if ignore_validations else None)
+                    )
+                    ignored_count = (
+                        self._ignore_validation_findings(
+                            version,
+                            actor_user_id=actor_user_id,
+                            reason=version.release_reason,
+                        )
+                        if ignore_validations
+                        else 0
                     )
                     self.session.flush()
-                analysis_run = self._create_analysis_run(version, "valuation_published")
+                analysis_run = (
+                    self._create_analysis_run(version, "valuation_published")
+                    if schedule_analysis
+                    else None
+                )
                 self._audit(
                     action="valuation.published",
                     version=version,
@@ -311,7 +336,9 @@ class PublishingService:
                     reason=version.release_reason,
                     summary={
                         "superseded_version_ids": [item.id for item in superseded],
-                        "analysis_run_id": analysis_run.id,
+                        "analysis_run_id": analysis_run.id if analysis_run else None,
+                        "analysis_scheduled": analysis_run is not None,
+                        "validation_ignored_count": ignored_count,
                     },
                 )
                 self.session.flush()
@@ -320,7 +347,8 @@ class PublishingService:
                     fund_id=version.fund_id,
                     valuation_date=version.valuation_date,
                     superseded_version_ids=tuple(item.id for item in superseded),
-                    analysis_run_id=analysis_run.id,
+                    analysis_run_id=analysis_run.id if analysis_run else None,
+                    validation_ignored_count=ignored_count,
                 )
         except PublishingServiceError:
             raise
@@ -500,7 +528,11 @@ class PublishingService:
                 self.session.info.pop(RELEASED_VERSION_MUTATION_KEY, None)
 
     def _ensure_publish_validation(
-        self, version: ValuationVersion, *, confirm_warnings: bool
+        self,
+        version: ValuationVersion,
+        *,
+        confirm_warnings: bool,
+        ignore_validations: bool,
     ) -> None:
         levels = tuple(
             self.session.scalars(
@@ -511,12 +543,54 @@ class PublishingService:
         )
         if not levels:
             raise PublishingValidationError("validation_required")
+        if ignore_validations:
+            return
         if ValidationLevel.WARNING in levels and not confirm_warnings:
             raise PublishingValidationError("warning_confirmation_required")
         if ValidationLevel.CRITICAL in levels and not self._review_was_approved(
             version.id
         ):
             raise PublishingValidationError("critical_validation_unapproved")
+
+    def _ignore_validation_findings(
+        self,
+        version: ValuationVersion,
+        *,
+        actor_user_id: int | None,
+        reason: str | None,
+    ) -> int:
+        findings = list(
+            self.session.scalars(
+                select(ValidationResult).where(
+                    ValidationResult.valuation_version_id == version.id,
+                    ValidationResult.ignored.is_(False),
+                )
+            ).all()
+        )
+        if not findings:
+            return 0
+        # The publication transaction temporarily authorizes this version's
+        # finding rows so the immutable-detail guard does not reject the
+        # intentional waiver metadata update.
+        allowed = set(self.session.info.get(RELEASED_VERSION_MUTATION_KEY, set()))
+        self.session.info[RELEASED_VERSION_MUTATION_KEY] = {*allowed, version.id}
+        ignored_at = utcnow()
+        for finding in findings:
+            finding.ignored = True
+            finding.ignored_at = ignored_at
+            finding.ignored_by_user_id = actor_user_id
+            finding.ignored_reason = reason
+        self._audit(
+            action="valuation.validation_ignored",
+            version=version,
+            actor_user_id=actor_user_id,
+            reason=reason,
+            summary={
+                "finding_count": len(findings),
+                "rule_codes": [finding.rule_code for finding in findings],
+            },
+        )
+        return len(findings)
 
     def _review_was_approved(self, version_id: int) -> bool:
         return (
@@ -534,14 +608,24 @@ class PublishingService:
         )
 
     def _create_analysis_run(
-        self, version: ValuationVersion, trigger_reason: str
+        self,
+        version: ValuationVersion,
+        trigger_reason: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> AnalysisRun:
+        input_version_range = (
+            f"fund:{version.fund_id};dates:{start_date.isoformat()}..{end_date.isoformat()}"
+            if start_date is not None and end_date is not None
+            else f"valuation_version:{version.id}"
+        )
         analysis_run = AnalysisRun(
             trigger_version_id=version.id,
             trigger_reason=trigger_reason,
-            input_start_date=version.valuation_date,
-            input_end_date=None,
-            input_version_range=f"valuation_version:{version.id}",
+            input_start_date=start_date or version.valuation_date,
+            input_end_date=end_date,
+            input_version_range=input_version_range,
             methodology_version=self.methodology_version,
             status=AnalysisRunStatus.QUEUED,
         )
@@ -555,6 +639,51 @@ class PublishingService:
         )
         self.session.flush()
         return analysis_run
+
+    def queue_analysis_run(
+        self,
+        version_id: int,
+        *,
+        start_date: date,
+        end_date: date,
+        actor_user_id: int | None,
+        trigger_reason: str,
+    ) -> AnalysisRun:
+        """Queue one bounded analysis run after a batch publication."""
+
+        if start_date > end_date:
+            raise PublishingStateError("analysis_date_range_invalid")
+        try:
+            with self.session.begin_nested():
+                version = self._load_version(version_id, for_update=True)
+                self._require_status(version, ValuationStatus.PUBLISHED)
+                run = self._create_analysis_run(
+                    version,
+                    trigger_reason,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                self.session.add(
+                    AuditLog(
+                        actor_user_id=actor_user_id,
+                        action="analysis.queued",
+                        resource_type="analysis_run",
+                        resource_id=str(run.id),
+                        summary={
+                            "trigger_version_id": version.id,
+                            "fund_id": version.fund_id,
+                            "start_date": start_date.isoformat(),
+                            "end_date": end_date.isoformat(),
+                        },
+                        result=AuditResult.SUCCESS,
+                    )
+                )
+                self.session.flush()
+                return run
+        except PublishingServiceError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PublishingServiceError("analysis_queue_persistence_failed") from exc
 
     def _audit(
         self,

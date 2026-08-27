@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import socket
+import ssl
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,6 +31,7 @@ from app.system.settings import (
 )
 
 router = APIRouter(prefix="/api/v1/mail", tags=["mail"])
+logger = logging.getLogger(__name__)
 
 DatabaseSession = Annotated[Session, Depends(get_db)]
 MailReader = Annotated[
@@ -203,10 +207,32 @@ def test_connection(
         settings = _mail_settings(session)
         service = _service(request, session, settings)
         service.test_connection()
-    except MailConfigurationError:
-        raise HTTPException(status_code=503, detail="Mail is not configured") from None
-    except MailConnectionError:
-        raise HTTPException(status_code=502, detail="Mail connection failed") from None
+    except MailConfigurationError as exc:
+        detail = str(exc)
+        if detail == "mail_password_unavailable":
+            logger.warning("mail connection blocked: credential unavailable")
+            raise HTTPException(
+                status_code=503, detail="mail_credential_unavailable"
+            ) from None
+        logger.warning("mail connection blocked: not configured")
+        raise HTTPException(status_code=503, detail="mail_not_configured") from None
+    except MailConnectionError as exc:
+        cause = exc.__cause__
+        if isinstance(cause, socket.timeout):
+            detail = "mail_connection_timeout"
+        elif isinstance(cause, socket.gaierror):
+            detail = "mail_dns_failed"
+        elif isinstance(cause, ssl.SSLError):
+            detail = "mail_tls_failed"
+        else:
+            detail = "mail_connection_failed"
+        logger.warning(
+            "mail connection failed: host=%s port=%s error=%s",
+            settings.host,
+            settings.port,
+            detail,
+        )
+        raise HTTPException(status_code=502, detail=detail) from None
     return {"data": {"connected": True}}
 
 

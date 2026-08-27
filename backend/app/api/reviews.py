@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
 from app.db.base import UserRole, ValidationLevel, ValuationStatus
-from app.db.models import Fund, ValidationResult, ValuationVersion
+from app.db.models import (
+    Fund,
+    ImportBatchFile,
+    SourceFile,
+    ValidationResult,
+    ValuationVersion,
+)
 from app.publishing import (
     PublishingService,
     PublishingServiceError,
@@ -82,25 +88,66 @@ def list_reviews(
     counts: dict[int, dict[str, int]] = {}
     for finding in findings:
         current = counts.setdefault(
-            finding.valuation_version_id, {"critical": 0, "warning": 0}
+            finding.valuation_version_id,
+            {"critical": 0, "warning": 0, "ignored": 0},
         )
+        if finding.ignored:
+            current["ignored"] += 1
+            continue
         if finding.level == ValidationLevel.CRITICAL:
             current["critical"] += 1
         elif finding.level == ValidationLevel.WARNING:
             current["warning"] += 1
-    data = [
+    source_ids = [version.source_file_id for version, _ in rows if version.source_file_id]
+    sources = (
         {
-            "id": version.id,
-            "fund_id": version.fund_id,
-            "fund_name": fund_name,
-            "valuation_date": version.valuation_date.isoformat(),
-            "version_no": version.version_no,
-            "status": version.status,
-            "critical_count": counts.get(version.id, {}).get("critical", 0),
-            "warning_count": counts.get(version.id, {}).get("warning", 0),
+            source.id: source
+            for source in session.scalars(
+                select(SourceFile).where(SourceFile.id.in_(source_ids))
+            )
         }
-        for version, fund_name in rows
-    ]
+        if source_ids
+        else {}
+    )
+    batch_links = (
+        session.execute(
+            select(ImportBatchFile.source_file_id, ImportBatchFile.batch_id)
+            .where(ImportBatchFile.source_file_id.in_(source_ids))
+            .order_by(ImportBatchFile.id)
+        ).all()
+        if source_ids
+        else []
+    )
+    batch_by_source = {source_id: batch_id for source_id, batch_id in batch_links}
+    findings_by_version: dict[int, list[ValidationResult]] = {}
+    for finding in findings:
+        findings_by_version.setdefault(finding.valuation_version_id, []).append(finding)
+    data = []
+    for version, fund_name in rows:
+        source = sources.get(version.source_file_id)
+        version_counts = counts.get(version.id, {})
+        data.append(
+            {
+                "id": version.id,
+                "fund_id": version.fund_id,
+                "fund_name": fund_name,
+                "valuation_date": version.valuation_date.isoformat(),
+                "version_no": version.version_no,
+                "status": version.status,
+                "critical_count": version_counts.get("critical", 0),
+                "warning_count": version_counts.get("warning", 0),
+                "ignored_count": version_counts.get("ignored", 0),
+                "source_file_id": source.id if source else None,
+                "source_filename": source.original_filename if source else None,
+                "source_file_hash": source.file_hash if source else None,
+                "source_file_size": source.file_size if source else None,
+                "import_batch_id": batch_by_source.get(source.id) if source else None,
+                "findings": [
+                    _validation_data(item)
+                    for item in findings_by_version.get(version.id, [])
+                ],
+            }
+        )
     return {
         "data": data,
         "meta": {"page": page, "page_size": page_size, "total": count},
@@ -142,6 +189,7 @@ def publish_version(
             actor_label=context.user.username,
             reason=payload.reason,
             confirm_warnings=payload.confirm_warnings,
+            ignore_validations=True,
         )
         session.commit()
     except (PublishingValidationError, PublishingStateError) as exc:
@@ -157,6 +205,7 @@ def publish_version(
             "valuation_date": result.valuation_date.isoformat(),
             "superseded_version_ids": list(result.superseded_version_ids),
             "analysis_run_id": result.analysis_run_id,
+            "validation_ignored_count": result.validation_ignored_count,
         }
     }
 
@@ -228,4 +277,25 @@ def restore_version(
             "superseded_version_ids": list(result.superseded_version_ids),
             "analysis_run_id": result.analysis_run_id,
         }
+    }
+
+
+def _validation_data(finding: ValidationResult) -> dict[str, object]:
+    return {
+        "rule_code": finding.rule_code,
+        "level": finding.level,
+        "actual_value": str(finding.actual_value)
+        if finding.actual_value is not None
+        else None,
+        "expected_value": str(finding.expected_value)
+        if finding.expected_value is not None
+        else None,
+        "difference": str(finding.difference)
+        if finding.difference is not None
+        else None,
+        "source_location": finding.source_location,
+        "message": finding.message,
+        "ignored": finding.ignored,
+        "ignored_at": finding.ignored_at.isoformat() if finding.ignored_at else None,
+        "ignored_reason": finding.ignored_reason,
     }

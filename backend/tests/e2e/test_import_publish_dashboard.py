@@ -80,15 +80,10 @@ def test_upload_worker_publish_and_dashboard_read(admin_client, app_and_engine) 
     with Session(app_and_engine[1]) as session:
         result = process_next_job(session, admin_client.app.state.settings)
         assert result is not None
+        assert result[1] is not None
+        assert result[1].published_files == 1
         version = session.query(ValuationVersion).one()
-        assert version.status == ValuationStatus.PUBLISHABLE
-        version_id = version.id
-
-    published = admin_client.post(
-        f"/api/v1/valuations/{version_id}/publish",
-        json={"confirm_warnings": True, "reason": "端到端验收"},
-    )
-    assert published.status_code == 200
+        assert version.status == ValuationStatus.PUBLISHED
     with Session(app_and_engine[1]) as session:
         analysis_result = process_next_job(session, admin_client.app.state.settings)
         assert analysis_result is not None

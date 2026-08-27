@@ -26,8 +26,8 @@ chmod 600 deploy/.env
 创建邮箱授权码文件：
 
 ```bash
-sudo install -d -m 700 /etc/fund-dashboard
-sudo install -m 600 /dev/null /etc/fund-dashboard/imap_password
+sudo install -d -m 700 -o 10001 -g 10001 /etc/fund-dashboard
+sudo install -m 600 -o 10001 -g 10001 /dev/null /etc/fund-dashboard/imap_password
 sudo sh -c 'umask 077; printf "%s" "REPLACE_WITH_QQ_AUTHORIZATION_CODE" > /etc/fund-dashboard/imap_password'
 ```
 
@@ -121,7 +121,7 @@ Compose 日志使用 `json-file`（JSON 文件日志），每个服务最多 3 �
 
 ### 邮件异常
 
-检查 QQ 邮箱 IMAP 服务、SSL（安全套接字层）端口 993、账号、授权码文件权限和容器挂载。邮箱设置接口只返回非敏感状态；暂停自动同步不影响管理员或业务员主动同步。
+检查 QQ 邮箱 IMAP 服务、SSL（安全套接字层）端口 993、账号、授权码文件权限和容器挂载。生产 Compose 中 API 与 worker 必须同时连接内部 `backend`（后端）网络和可访问公网的 `egress`（外联）网络；数据库只连接内部网络。邮箱设置接口只返回非敏感状态；暂停自动同步不影响管理员或业务员主动同步。
 
 ## 8. 升级、回滚和恢复
 
