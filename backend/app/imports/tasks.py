@@ -236,7 +236,7 @@ def process_next_job(
             result = MailService.from_app_settings(
                 session, settings, mail_settings
             ).sync(
-                actor_user_id or 0,
+                actor_user_id,
                 run_id=job.resource_id,
                 job=job,
             )

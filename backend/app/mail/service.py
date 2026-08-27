@@ -131,7 +131,7 @@ class MailService:
         with self.client.open() as connection:
             self.client.select_readonly(connection)
 
-    def enqueue_sync(self, actor_user_id: int) -> MailSyncResult:
+    def enqueue_sync(self, actor_user_id: int | None) -> MailSyncResult:
         self.settings.require_configured()
         active = self.session.scalar(
             select(BackgroundJob).where(
@@ -146,7 +146,7 @@ class MailService:
 
     def sync(
         self,
-        actor_user_id: int,
+        actor_user_id: int | None,
         *,
         run_id: str | None = None,
         job: BackgroundJob | None = None,
@@ -255,7 +255,7 @@ class MailService:
         ]
         return (active + completed)[:limit]
 
-    def _start_run(self, actor_user_id: int, *, queued: bool = False) -> tuple[str, BackgroundJob]:
+    def _start_run(self, actor_user_id: int | None, *, queued: bool = False) -> tuple[str, BackgroundJob]:
         run_id = uuid4().hex
         now = datetime.now(UTC)
         job = BackgroundJob(
@@ -347,7 +347,7 @@ class MailService:
         connection: Any,
         uid: str,
         run_id: str,
-        actor_user_id: int,
+        actor_user_id: int | None,
         counters: _SyncCounters,
         *,
         external_id: str | None = None,
@@ -459,7 +459,7 @@ class MailService:
         part: Message,
         filename_header: str,
         source_message: SourceMessage,
-        actor_user_id: int,
+        actor_user_id: int | None,
         batch: ImportBatch | None,
         total_attachment_bytes: int,
         run_id: str,
@@ -535,7 +535,7 @@ class MailService:
         source_message: SourceMessage,
         run_id: str,
         code: str,
-        actor_user_id: int,
+        actor_user_id: int | None,
     ) -> None:
         ignored = code in {
             "unsupported_extension",

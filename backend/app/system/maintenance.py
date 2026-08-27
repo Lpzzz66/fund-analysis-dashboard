@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import UTC
-from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -192,7 +191,7 @@ class MaintenanceService:
             self.session,
             self.settings,
             mail_settings,
-        ).sync(cast(int, self.actor_user_id))
+        ).sync(self.actor_user_id)
         summary = {
             key: value
             for key, value in result.as_dict().items()

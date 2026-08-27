@@ -438,3 +438,56 @@ def test_decode_filename_rejects_misdeclared_charset() -> None:
     # When charset and bytes agree, decoding still works.
     good = "=?utf-8?B?5L2g5aW9?="
     assert service._decode_filename(good) == "你好"
+
+
+def test_sync_with_none_actor_user_id_succeeds(
+    admin_client: TestClient,
+    fake_mailbox: FakeMailbox,
+    app_and_engine: tuple[object, object],
+) -> None:
+    """Scheduler-triggered syncs pass actor_user_id=None because no human
+    user initiated them. The sync must not crash with a foreign-key violation
+    on audit_log.actor_user_id (which used to happen when 0 was passed)."""
+
+    from app.db.models import BackgroundJob
+    from app.db.base import JobStatus
+    from app.mail.config import MailSettings
+    from app.mail.service import MailService
+    from app.system.settings import effective_mail_username
+
+    fake_mailbox.messages.update(
+        {
+            "1": make_email(
+                "<scheduler-1@example.test>", [("valuation.xlsx", make_xlsx_bytes())]
+            ),
+        }
+    )
+
+    app, engine = app_and_engine
+    with Session(engine) as session:
+        mail_settings = MailSettings.from_environment(
+            username_override=effective_mail_username(session)
+        )
+        # Pretend the scheduler enqueued this job (no mail.sync_started audit).
+        job = BackgroundJob(
+            job_type="mail_sync",
+            resource_id="scheduler-test-run",
+            status=JobStatus.RUNNING,
+            attempts=1,
+            max_attempts=1,
+        )
+        session.add(job)
+        session.flush()
+
+        service = MailService.from_app_settings(
+            session,
+            app.state.settings,
+            mail_settings,
+            connection_factory=app.state.mail_connection_factory,
+        )
+        # actor_user_id=None — the scheduler path
+        result = service.sync(None, run_id="scheduler-test-run", job=job)
+        session.commit()
+
+    assert result.status == "succeeded"
+    assert result.summary["messages_imported"] == 1
