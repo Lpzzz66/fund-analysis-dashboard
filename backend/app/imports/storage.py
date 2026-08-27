@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import secrets
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,14 +102,30 @@ def stage_upload(
 
 
 def store_staged_upload(staged: StagedUpload, storage_root: Path) -> tuple[str, Path]:
-    """Move a validated temporary file to a random immutable object name."""
+    """Persist a validated upload under a random immutable object name."""
 
     storage_root.mkdir(parents=True, exist_ok=True)
     for _ in range(10):
         object_name = f"{secrets.token_hex(24)}{staged.extension}"
         destination = resolve_in_root(storage_root, object_name)
         if not destination.exists():
-            staged.path.replace(destination)
+            try:
+                staged.path.replace(destination)
+            except OSError as exc:
+                if exc.errno != errno.EXDEV:
+                    raise
+                try:
+                    with (
+                        staged.path.open("rb") as source,
+                        destination.open("xb") as target,
+                    ):
+                        shutil.copyfileobj(source, target)
+                except FileExistsError:
+                    continue
+                except Exception:
+                    destination.unlink(missing_ok=True)
+                    raise
+                staged.path.unlink()
             return object_name, destination
     raise RuntimeError("Could not allocate a unique source-file object name")
 

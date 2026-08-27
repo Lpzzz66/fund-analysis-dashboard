@@ -1,3 +1,4 @@
+import errno
 from dataclasses import replace
 from hashlib import sha256
 from io import BytesIO
@@ -13,6 +14,8 @@ from app.imports.storage import (
     InvalidFileError,
     UnsafeStoragePathError,
     resolve_in_root,
+    stage_upload,
+    store_staged_upload,
 )
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -110,6 +113,31 @@ def test_valid_xls_ole_header_is_accepted(
 
         assert result.source_file.file_extension == ".xls"
         assert result.duplicate is False
+
+
+def test_stored_upload_falls_back_to_copy_across_filesystems(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker mounts may make staging and durable storage separate filesystems."""
+
+    content = make_xlsx_bytes()
+    temp_root = tmp_path / "temp"
+    storage_root = tmp_path / "source"
+    staged = stage_upload(BytesIO(content), "valuation.xlsx", temp_root, 1024 * 1024)
+    original_replace = Path.replace
+
+    def cross_device_replace(path: Path, target: str | Path) -> Path:
+        if path == staged.path:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", cross_device_replace)
+
+    object_name, stored_path = store_staged_upload(staged, storage_root)
+
+    assert stored_path.name == object_name
+    assert stored_path.read_bytes() == content
+    assert not staged.path.exists()
 
 
 @pytest.mark.parametrize(
