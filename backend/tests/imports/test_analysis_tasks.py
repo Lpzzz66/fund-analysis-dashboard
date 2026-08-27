@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
+from app.analytics.service import _lock_fund_for_analysis
 from app.db.base import AnalysisRunStatus, JobStatus, RiskSeverity, ValuationStatus
 from app.db.models import (
     AnalysisRun,
@@ -18,6 +20,19 @@ from app.imports.tasks import claim_next_job, process_next_job
 from app.publishing import PublishingService
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+def test_postgresql_analysis_locks_fund_before_event_reconciliation() -> None:
+    statements: list[object] = []
+    fake_session = SimpleNamespace(
+        bind=SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+        scalar=lambda statement: statements.append(statement),
+    )
+
+    _lock_fund_for_analysis(fake_session, 42)  # type: ignore[arg-type]
+
+    assert len(statements) == 1
+    assert getattr(statements[0], "_for_update_arg", None) is not None
 
 
 def _published_history(session: Session) -> tuple[Fund, tuple[ValuationVersion, ...]]:

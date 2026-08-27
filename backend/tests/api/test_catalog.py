@@ -132,6 +132,28 @@ def test_fund_crud_lifecycle_alias_conflict_and_audit(
     }.issubset(set(actions))
 
 
+def test_fund_can_be_renamed_to_its_own_alias(
+    admin_client: TestClient,
+) -> None:
+    created = admin_client.post(
+        "/api/v1/funds",
+        json={
+            "standard_name": "原产品名",
+            "product_code": "RENAME-001",
+            "establishment_date": "2024-01-01",
+            "aliases": [{"alias": "目标产品名"}],
+        },
+    )
+    fund_id = created.json()["data"]["id"]
+
+    response = admin_client.patch(
+        f"/api/v1/funds/{fund_id}", json={"standard_name": "目标产品名"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["standard_name"] == "目标产品名"
+
+
 def test_fund_create_requires_identity_fields_and_alias(
     admin_client: TestClient,
 ) -> None:

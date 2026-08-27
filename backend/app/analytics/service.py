@@ -96,6 +96,7 @@ def process_analysis_run(
     )
     positions = _group_positions(session, affected_records)
     rules = tuple(session.scalars(select(RiskRule).order_by(RiskRule.id)).all())
+    _lock_fund_for_analysis(session, trigger.fund_id)
     existing_events = (
         _open_risk_events(
             session,
@@ -305,6 +306,15 @@ def _ratio(numerator: Decimal | None, denominator: Decimal | None) -> Decimal | 
 
 def _date_in_range(day: date, start_date: date, end_date: date | None) -> bool:
     return day >= start_date and (end_date is None or day <= end_date)
+
+
+def _lock_fund_for_analysis(session: Session, fund_id: int) -> None:
+    """Serialize event reconciliation for one fund in production."""
+
+    statement = select(Fund.id).where(Fund.id == fund_id)
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        statement = statement.with_for_update()
+    session.scalar(statement)
 
 
 def _open_risk_events(

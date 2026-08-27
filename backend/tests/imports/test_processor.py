@@ -15,7 +15,12 @@ from app.db.models import (
     SubjectMapping,
     ValuationVersion,
 )
-from app.imports.processor import _product_aliases, _resolve_fund, process_import_batch
+from app.imports.processor import (
+    _load_product_identity,
+    _product_aliases,
+    _resolve_fund,
+    process_import_batch,
+)
 from app.imports.service import ImportService
 from app.imports.tasks import process_next_job
 from openpyxl import Workbook
@@ -258,5 +263,46 @@ def test_product_alias_queries_are_constant_for_multiple_funds(
             select_statements.clear()
             assert _resolve_fund(session, " a-product ") is funds[0]
             assert len(select_statements) == 1
+        finally:
+            event.remove(engine, "before_cursor_execute", count_selects)
+
+
+def test_product_identity_uses_alias_priority_and_reuses_one_query(
+    app_and_engine: tuple[object, object],
+) -> None:
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        low = Fund(standard_name="低优先级产品")
+        high = Fund(standard_name="高优先级产品")
+        session.add_all([low, high])
+        session.flush()
+        session.add_all(
+            [
+                FundAlias(fund_id=low.id, alias="共同别名", match_priority=1),
+                FundAlias(fund_id=high.id, alias="共同别名", match_priority=20),
+            ]
+        )
+        session.flush()
+
+        select_count = 0
+
+        def count_selects(
+            _conn: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            nonlocal select_count
+            if statement.lstrip().upper().startswith("SELECT"):
+                select_count += 1
+
+        event.listen(engine, "before_cursor_execute", count_selects)
+        try:
+            aliases, lookup = _load_product_identity(session)
+            assert _resolve_fund(session, "共同别名", lookup=lookup) is high
+            assert aliases["高优先级产品"] == ("共同别名",)
+            assert select_count == 1
         finally:
             event.remove(engine, "before_cursor_execute", count_selects)

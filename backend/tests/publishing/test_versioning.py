@@ -25,7 +25,7 @@ from app.publishing import (
     PublishingStateError,
     PublishingValidationError,
 )
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 VALUATION_DATE = date(2026, 8, 25)
@@ -404,6 +404,50 @@ def test_released_version_details_cannot_be_updated_or_deleted(
     session.delete(snapshot)
     with pytest.raises(PublishedVersionImmutableError):
         session.flush()
+
+
+def test_detail_guard_loads_candidate_versions_in_one_query(session: Session) -> None:
+    fund = _fund(session)
+    first = _version(session, fund, 1)
+    second = _version(session, fund, 2)
+    first_id = first.id
+    second_id = second.id
+    session.commit()
+    session.expunge_all()
+    snapshots = session.scalars(
+        select(FundDailySnapshot).where(
+            FundDailySnapshot.valuation_version_id.in_((first_id, second_id))
+        )
+    ).all()
+    for snapshot in snapshots:
+        snapshot.net_asset_value = Decimal(72)
+
+    version_selects = 0
+
+    def count_version_selects(
+        _conn: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        nonlocal version_selects
+        normalized = statement.lower()
+        if (
+            normalized.lstrip().startswith("select")
+            and "from valuation_version" in normalized
+        ):
+            version_selects += 1
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", count_version_selects)
+    try:
+        session.flush()
+    finally:
+        event.remove(engine, "before_cursor_execute", count_version_selects)
+
+    assert version_selects == 1
 
 
 def test_released_version_parent_cannot_be_deleted(session: Session) -> None:

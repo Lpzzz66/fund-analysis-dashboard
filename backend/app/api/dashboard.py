@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, over, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.analytics.nav import calculate_nav_series
 from app.auth.dependencies import AuthContext, get_auth_context, get_db
@@ -37,6 +38,16 @@ DatabaseSession = Annotated[Session, Depends(get_db)]
 CurrentContext = Annotated[AuthContext, Depends(get_auth_context)]
 
 
+@dataclass(frozen=True, slots=True)
+class _VersionView:
+    fund: Fund
+    snapshot: FundDailySnapshot | None
+    quality_status: str
+    analysis_status: str
+    analysis_run: AnalysisRun | None
+    metric: FundMetricDaily | None
+
+
 def _decimal(value: Decimal | None) -> str | None:
     return str(value) if value is not None else None
 
@@ -45,6 +56,7 @@ def _published_versions(
     session: Session,
     *,
     fund_id: int | None = None,
+    fund_ids: tuple[int, ...] | None = None,
     as_of: date | None = None,
 ) -> list[ValuationVersion]:
     """Return the most recent PUBLISHED version per active fund.
@@ -72,6 +84,8 @@ def _published_versions(
     )
     if fund_id is not None:
         subquery = subquery.where(ValuationVersion.fund_id == fund_id)
+    if fund_ids is not None:
+        subquery = subquery.where(ValuationVersion.fund_id.in_(fund_ids))
     if as_of is not None:
         subquery = subquery.where(ValuationVersion.valuation_date == as_of)
     subquery = subquery.subquery()
@@ -202,6 +216,111 @@ def _latest_company_metric(
     return metric, run
 
 
+def _version_views(
+    session: Session, versions: list[ValuationVersion]
+) -> dict[int, _VersionView]:
+    if not versions:
+        return {}
+    version_ids = tuple(version.id for version in versions)
+    fund_ids = tuple({version.fund_id for version in versions})
+    start_date = min(version.valuation_date for version in versions)
+    end_date = max(version.valuation_date for version in versions)
+
+    funds = {
+        fund.id: fund
+        for fund in session.scalars(select(Fund).where(Fund.id.in_(fund_ids)))
+    }
+    snapshots = {
+        snapshot.valuation_version_id: snapshot
+        for snapshot in session.scalars(
+            select(FundDailySnapshot).where(
+                FundDailySnapshot.valuation_version_id.in_(version_ids)
+            )
+        )
+    }
+    warning_versions = set(
+        session.scalars(
+            select(ValidationResult.valuation_version_id)
+            .where(
+                ValidationResult.valuation_version_id.in_(version_ids),
+                ValidationResult.level.in_(("critical", "warning")),
+            )
+            .distinct()
+        )
+    )
+
+    trigger_version = aliased(ValuationVersion)
+    covering_runs: dict[int, list[AnalysisRun]] = {}
+    rows = session.execute(
+        select(AnalysisRun, trigger_version.fund_id)
+        .join(trigger_version, trigger_version.id == AnalysisRun.trigger_version_id)
+        .where(
+            trigger_version.fund_id.in_(fund_ids),
+            AnalysisRun.input_start_date.is_not(None),
+            AnalysisRun.input_start_date <= end_date,
+            (AnalysisRun.input_end_date.is_(None))
+            | (AnalysisRun.input_end_date >= start_date),
+        )
+        .order_by(AnalysisRun.id.desc())
+    )
+    for run, run_fund_id in rows:
+        covering_runs.setdefault(run_fund_id, []).append(run)
+
+    metrics: dict[tuple[int, date], FundMetricDaily] = {}
+    metric_runs: dict[tuple[int, date], AnalysisRun] = {}
+    metric_rows = session.execute(
+        select(FundMetricDaily, AnalysisRun)
+        .join(AnalysisRun, AnalysisRun.id == FundMetricDaily.source_analysis_run_id)
+        .where(
+            FundMetricDaily.fund_id.in_(fund_ids),
+            FundMetricDaily.valuation_date >= start_date,
+            FundMetricDaily.valuation_date <= end_date,
+            AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
+        )
+        .order_by(AnalysisRun.id.desc(), FundMetricDaily.id.desc())
+    )
+    version_keys = {(version.fund_id, version.valuation_date) for version in versions}
+    for metric, run in metric_rows:
+        key = (metric.fund_id, metric.valuation_date)
+        if key in version_keys and key not in metrics:
+            metrics[key] = metric
+            metric_runs[key] = run
+
+    views: dict[int, _VersionView] = {}
+    for version in versions:
+        key = (version.fund_id, version.valuation_date)
+        latest = next(
+            (
+                run
+                for run in covering_runs.get(version.fund_id, ())
+                if run.input_start_date is not None
+                and run.input_start_date <= version.valuation_date
+                and (
+                    run.input_end_date is None
+                    or run.input_end_date >= version.valuation_date
+                )
+            ),
+            None,
+        )
+        if latest is None:
+            analysis_status = "pending"
+        elif latest.status == AnalysisRunStatus.SUCCEEDED:
+            analysis_status = "ready" if key in metrics else "stale"
+        elif latest.status == AnalysisRunStatus.FAILED:
+            analysis_status = "stale"
+        else:
+            analysis_status = "pending"
+        views[version.id] = _VersionView(
+            fund=funds[version.fund_id],
+            snapshot=snapshots.get(version.id),
+            quality_status="warning" if version.id in warning_versions else "valid",
+            analysis_status=analysis_status,
+            analysis_run=metric_runs.get(key) if analysis_status == "ready" else None,
+            metric=metrics.get(key) if analysis_status == "ready" else None,
+        )
+    return views
+
+
 @router.get("/api/v1/dashboard/overview")
 def overview(
     _: CurrentContext,
@@ -215,11 +334,12 @@ def overview(
         or 0
     )
     versions = _published_versions(session, as_of=as_of)
+    views = _version_views(session, versions)
     selected_fund_ids = {version.fund_id for version in versions}
     snapshots = [
-        snapshot
+        view.snapshot
         for version in versions
-        if (snapshot := _snapshot(session, version.id)) is not None
+        if (view := views[version.id]).snapshot is not None
     ]
     total_net_assets = sum(
         (
@@ -239,7 +359,7 @@ def overview(
         )
         or 0
     )
-    analysis_states = [_analysis_status(session, version) for version in versions]
+    analysis_states = [views[version.id].analysis_status for version in versions]
     analysis_status = (
         "stale"
         if "stale" in analysis_states
@@ -267,12 +387,12 @@ def overview(
             "quality_status": (
                 "warning"
                 if any(
-                    _quality_status(session, version.id) == "warning"
+                    views[version.id].quality_status == "warning"
                     for version in versions
                 )
                 else "valid"
             ),
-            "funds": _overview_funds(session, versions),
+            "funds": _overview_funds(versions, views),
         },
         "meta": {
             "as_of": as_of.isoformat() if as_of else None,
@@ -284,22 +404,17 @@ def overview(
 
 
 def _overview_funds(
-    session: Session, versions: list[ValuationVersion]
+    versions: list[ValuationVersion], views: dict[int, _VersionView]
 ) -> list[dict[str, object]]:
     data: list[dict[str, object]] = []
     for version in versions:
-        snapshot = _snapshot(session, version.id)
-        analysis_status = _analysis_status(session, version)
-        analysis_run = (
-            _analysis_run_for_version(session, version)
-            if analysis_status == "ready"
-            else None
-        )
-        metric = _metric_for_version(session, version)
+        view = views[version.id]
+        snapshot = view.snapshot
+        metric = view.metric
         data.append(
             {
                 "id": version.fund_id,
-                "name": version.fund.standard_name,
+                "name": view.fund.standard_name,
                 "valuation_date": version.valuation_date.isoformat(),
                 "unit_nav": _decimal(snapshot.unit_nav) if snapshot else None,
                 "daily_return": _decimal(
@@ -309,8 +424,8 @@ def _overview_funds(
                     if snapshot
                     else None
                 ),
-                "analysis_status": analysis_status,
-                "analysis_run_id": analysis_run.id if analysis_run else None,
+                "analysis_status": view.analysis_status,
+                "analysis_run_id": view.analysis_run.id if view.analysis_run else None,
             }
         )
     return data
@@ -339,16 +454,15 @@ def list_funds(
     offset = (page - 1) * page_size
     data = []
     funds = list(session.scalars(statement.offset(offset).limit(page_size)))
+    fund_ids = tuple(fund.id for fund in funds)
+    versions = _published_versions(session, fund_ids=fund_ids, as_of=as_of)
+    versions_by_fund = {version.fund_id: version for version in versions}
+    views = _version_views(session, versions)
     for fund in funds:
-        version = _version_for_fund(session, fund.id, as_of)
-        snapshot = _snapshot(session, version.id) if version else None
-        analysis_status = _analysis_status(session, version) if version else "pending"
-        analysis_run = (
-            _analysis_run_for_version(session, version)
-            if version and analysis_status == "ready"
-            else None
-        )
-        metric = _metric_for_version(session, version) if version else None
+        version = versions_by_fund.get(fund.id)
+        view = views.get(version.id) if version else None
+        snapshot = view.snapshot if view else None
+        metric = view.metric if view else None
         data.append(
             {
                 "id": fund.id,
@@ -367,11 +481,11 @@ def list_funds(
                     if snapshot
                     else None
                 ),
-                "quality_status": _quality_status(session, version.id)
-                if version
-                else "pending",
-                "analysis_status": analysis_status,
-                "analysis_run_id": analysis_run.id if analysis_run else None,
+                "quality_status": view.quality_status if view else "pending",
+                "analysis_status": view.analysis_status if view else "pending",
+                "analysis_run_id": view.analysis_run.id
+                if view and view.analysis_run
+                else None,
             }
         )
     return {
@@ -479,6 +593,7 @@ def nav_series(
         statement = statement.where(ValuationVersion.valuation_date <= end)
     rows = list(session.execute(statement))
     versions = [version for version, _ in rows]
+    views = _version_views(session, versions)
     records = [
         {
             "valuation_date": version.valuation_date,
@@ -489,41 +604,13 @@ def nav_series(
         for version, snapshot in rows
     ]
     result = calculate_nav_series(records)
-    metrics: dict[date, FundMetricDaily] = {}
-    if versions:
-        metric_rows = session.scalars(
-            select(FundMetricDaily)
-            .join(
-                AnalysisRun,
-                AnalysisRun.id == FundMetricDaily.source_analysis_run_id,
-            )
-            .where(
-                FundMetricDaily.fund_id == fund_id,
-                FundMetricDaily.valuation_date.in_(
-                    tuple(version.valuation_date for version in versions)
-                ),
-                AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
-            )
-            .order_by(
-                FundMetricDaily.valuation_date,
-                AnalysisRun.id.desc(),
-                FundMetricDaily.id.desc(),
-            )
-        )
-        for metric in metric_rows:
-            metrics.setdefault(metric.valuation_date, metric)
-
-    statuses = {
-        version.valuation_date: _analysis_status(session, version)
-        for version in versions
-    }
+    views_by_date = {version.valuation_date: views[version.id] for version in versions}
     points: list[dict[str, object]] = []
     sources: set[str] = set()
     for point in result.points:
-        analysis_status = statuses.get(point.valuation_date, "pending")
-        metric = (
-            metrics.get(point.valuation_date) if analysis_status == "ready" else None
-        )
+        view = views_by_date.get(point.valuation_date)
+        analysis_status = view.analysis_status if view else "pending"
+        metric = view.metric if view else None
         metric_source = "persisted" if metric is not None else "calculated_fallback"
         sources.add(metric_source)
         points.append(
@@ -550,9 +637,10 @@ def nav_series(
         )
     overall_status = (
         "stale"
-        if "stale" in statuses.values()
+        if any(view.analysis_status == "stale" for view in views.values())
         else "pending"
-        if "pending" in statuses.values() or not statuses
+        if any(view.analysis_status == "pending" for view in views.values())
+        or not views
         else "ready"
     )
     metric_source = (

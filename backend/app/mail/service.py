@@ -30,6 +30,7 @@ from .config import MailSettings
 
 VALUATION_EXTENSIONS = {".xls", ".xlsx"}
 MAX_MESSAGE_ID_LENGTH = 255
+MAX_ORIGINAL_FILENAME_LENGTH = 500
 # Windows reserved device names (case-insensitive). Filenames like CON.xlsx
 # or NUL.xlsx were accepted before, then the OS stripped the extension and
 # routed the file to the corresponding device on Windows hosts.
@@ -535,7 +536,11 @@ class MailService:
 
     @staticmethod
     def _safe_filename(filename: str) -> bool:
-        if not filename or filename in {".", ".."}:
+        if (
+            not filename
+            or len(filename) > MAX_ORIGINAL_FILENAME_LENGTH
+            or filename in {".", ".."}
+        ):
             return False
         if any(character in filename for character in ("\x00", "/", "\\")):
             return False

@@ -9,7 +9,7 @@ from app.db.models import (
     FundMetricDaily,
     ValuationVersion,
 )
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from .conftest import seed_published_fund
@@ -195,6 +195,40 @@ def test_fund_list_reports_total_and_empty_out_of_range_page(
         "page_size": 2,
         "total": 3,
     }
+
+
+def test_fund_list_query_count_is_constant_for_page_size(
+    admin_client, app_and_engine
+) -> None:
+    engine = app_and_engine[1]
+    for index in range(8):
+        seed_published_fund(engine, name=f"批量产品{index}")
+
+    select_count = 0
+
+    def count_selects(
+        _conn: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        nonlocal select_count
+        if statement.lstrip().upper().startswith("SELECT"):
+            select_count += 1
+
+    event.listen(engine, "before_cursor_execute", count_selects)
+    try:
+        response = admin_client.get(
+            "/api/v1/funds", params={"page": 1, "page_size": 20}
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", count_selects)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]) == 8
+    assert select_count <= 10
 
 
 def test_positions_report_total_and_empty_out_of_range_page(

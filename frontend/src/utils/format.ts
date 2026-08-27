@@ -3,7 +3,7 @@
 
 /** Trim trailing zeros from a decimal string, keep at least 2dp for currency. */
 export function dec(value: string | null | undefined, dp = 2): string {
-  if (value === null || value === undefined) return "—";
+  if (value === "" || value === null || value === undefined) return "—";
   const n = Number(value);
   if (!isFinite(n)) return "—";
   return n.toLocaleString("en-US", {
@@ -56,7 +56,7 @@ export function timeStr(value: string | null | undefined): string {
   if (!value) return "—";
   const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
   const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+  if (Number.isNaN(date.getTime())) return value;
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
@@ -82,5 +82,10 @@ export function returnColor(value: string | null | undefined): string {
 
 /** Today as ISO date. */
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }

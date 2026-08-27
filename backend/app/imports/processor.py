@@ -75,7 +75,7 @@ def process_import_batch(
     batch.started_at = datetime.now(UTC)
     session.flush()
 
-    aliases = _product_aliases(session)
+    aliases, fund_lookup = _load_product_identity(session)
     mappings = _subject_mappings(session)
     parser = ValuationParser(aliases)
     links = tuple(
@@ -134,7 +134,7 @@ def process_import_batch(
             )
             continue
 
-        fund = _resolve_fund(session, parsed.product_name)
+        fund = _resolve_fund(session, parsed.product_name, lookup=fund_lookup)
         if fund is None or parsed.valuation_date is None:
             counters["review"] += 1
             _audit(
@@ -183,35 +183,51 @@ def process_import_batch(
     )
 
 
-def _product_aliases(session: Session) -> dict[str, tuple[str, ...]]:
+def _load_product_identity(
+    session: Session,
+) -> tuple[dict[str, tuple[str, ...]], dict[str, Fund]]:
     aliases: dict[str, list[str]] = {}
-    rows = session.execute(
-        select(Fund, FundAlias.alias)
-        .outerjoin(FundAlias, FundAlias.fund_id == Fund.id)
-        .order_by(Fund.id, FundAlias.id)
+    rows = list(
+        session.execute(
+            select(Fund, FundAlias.alias)
+            .outerjoin(FundAlias, FundAlias.fund_id == Fund.id)
+            .order_by(
+                FundAlias.match_priority.desc().nulls_last(), Fund.id, FundAlias.id
+            )
+        )
     )
+    lookup: dict[str, Fund] = {}
     for fund, alias in rows:
         aliases.setdefault(fund.standard_name, [])
+        lookup.setdefault(fund.standard_name.strip().casefold(), fund)
         if alias is not None:
             aliases[fund.standard_name].append(alias)
-    return {standard_name: tuple(items) for standard_name, items in aliases.items()}
+    for fund, alias in rows:
+        if alias is not None:
+            lookup.setdefault(alias.strip().casefold(), fund)
+    return (
+        {standard_name: tuple(items) for standard_name, items in aliases.items()},
+        lookup,
+    )
 
 
-def _resolve_fund(session: Session, product_name: str | None) -> Fund | None:
+def _product_aliases(session: Session) -> dict[str, tuple[str, ...]]:
+    aliases, _ = _load_product_identity(session)
+    return aliases
+
+
+def _resolve_fund(
+    session: Session,
+    product_name: str | None,
+    *,
+    lookup: dict[str, Fund] | None = None,
+) -> Fund | None:
     if not product_name:
         return None
     normalized = product_name.strip().casefold()
-    rows = session.execute(
-        select(Fund, FundAlias.alias)
-        .outerjoin(FundAlias, FundAlias.fund_id == Fund.id)
-        .order_by(Fund.id, FundAlias.id)
-    )
-    for fund, alias in rows:
-        if fund.standard_name.strip().casefold() == normalized:
-            return fund
-        if alias is not None and alias.strip().casefold() == normalized:
-            return fund
-    return None
+    if lookup is None:
+        _, lookup = _load_product_identity(session)
+    return lookup.get(normalized)
 
 
 def _subject_mappings(session: Session) -> tuple[SubjectMapping, ...]:

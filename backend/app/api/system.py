@@ -229,6 +229,13 @@ def list_audit_logs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, object]:
+    if any(
+        value is not None and (value.tzinfo is None or value.utcoffset() is None)
+        for value in (start, end)
+    ):
+        raise HTTPException(
+            status_code=422, detail="start and end must include a timezone"
+        )
     if start and end and end < start:
         raise HTTPException(
             status_code=422, detail="end must not be earlier than start"

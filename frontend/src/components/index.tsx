@@ -225,15 +225,23 @@ export function usePolling(
 ) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stableTicks = useRef(0);
+  const isDoneRef = useRef(isDone);
+  const fetchRef = useRef(fetch);
+  const onUpdateRef = useRef(onUpdate);
+  useEffect(() => {
+    isDoneRef.current = isDone;
+    fetchRef.current = fetch;
+    onUpdateRef.current = onUpdate;
+  }, [fetch, isDone, onUpdate]);
   useEffect(() => {
     if (!isActive) return;
     let cancelled = false;
     async function tick() {
       try {
-        const r = await fetch();
+        const r = await fetchRef.current();
         if (cancelled) return;
-        onUpdate(r);
-        if (isDone(r)) {
+        onUpdateRef.current(r);
+        if (isDoneRef.current(r)) {
           stableTicks.current = 0;
           return; // stop polling when done
         }
@@ -250,7 +258,6 @@ export function usePolling(
       if (timer.current) clearTimeout(timer.current);
       stableTicks.current = 0;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 }
 

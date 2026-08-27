@@ -291,6 +291,14 @@ def test_audit_query_is_read_only_filtered_and_redacts_sensitive_summary(
     assert admin_client.delete("/api/v1/audit-logs/1").status_code == 404
 
 
+def test_audit_query_rejects_timezone_less_datetime(admin_client: TestClient) -> None:
+    response = admin_client.get(
+        "/api/v1/audit-logs", params={"start": "2026-08-27T00:00:00"}
+    )
+
+    assert response.status_code == 422
+
+
 def test_mail_settings_accepts_only_the_non_sensitive_username(
     admin_client: TestClient,
 ) -> None:

@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -206,16 +206,22 @@ def _assert_fund_name_available(
     session: Session, name: str, *, exclude_fund_id: int | None = None
 ) -> None:
     normalized_name = name.strip().casefold()
-    funds = session.scalars(select(Fund)).all()
-    if any(
-        fund.id != exclude_fund_id
-        and fund.standard_name.strip().casefold() == normalized_name
-        for fund in funds
-    ):
+    fund_statement = select(Fund).where(
+        func.lower(func.trim(Fund.standard_name)) == normalized_name
+    )
+    if exclude_fund_id is not None:
+        fund_statement = fund_statement.where(Fund.id != exclude_fund_id)
+    if session.scalar(fund_statement.with_only_columns(Fund.id).limit(1)) is not None:
         raise HTTPException(status_code=409, detail="Fund name already exists")
-    if any(
-        alias.alias.strip().casefold() == normalized_name
-        for alias in session.scalars(select(FundAlias))
+    alias_statement = select(FundAlias)
+    if exclude_fund_id is not None:
+        alias_statement = alias_statement.where(FundAlias.fund_id != exclude_fund_id)
+    alias_statement = alias_statement.where(
+        func.lower(func.trim(FundAlias.alias)) == normalized_name
+    )
+    if (
+        session.scalar(alias_statement.with_only_columns(FundAlias.id).limit(1))
+        is not None
     ):
         raise HTTPException(status_code=409, detail="Fund name conflicts with an alias")
 

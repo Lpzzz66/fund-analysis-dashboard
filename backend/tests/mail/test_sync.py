@@ -374,6 +374,8 @@ def test_safe_filename_rejects_windows_reserved_names() -> None:
     assert service._safe_filename("report.xlsx ") is False
     # Normal filenames still pass.
     assert service._safe_filename("估值表.xlsx") is True
+    assert service._safe_filename(f"{'x' * 495}.xlsx") is True
+    assert service._safe_filename(f"{'x' * 496}.xlsx") is False
 
 
 def test_decode_filename_rejects_misdeclared_charset() -> None:

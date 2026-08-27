@@ -91,13 +91,29 @@ def _protect_released_version_details(
     """Reject ORM updates and deletes of released valuation details."""
 
     candidates = tuple(session.new) + tuple(session.dirty) + tuple(session.deleted)
-    for item in candidates:
-        if not isinstance(item, IMMUTABLE_DETAIL_TYPES):
-            continue
+    detail_candidates = tuple(
+        item for item in candidates if isinstance(item, IMMUTABLE_DETAIL_TYPES)
+    )
+    version_ids = {
+        version_id
+        for item in detail_candidates
+        if (version_id := getattr(item, "valuation_version_id", None)) is not None
+    }
+    versions = (
+        {
+            version.id: version
+            for version in session.scalars(
+                select(ValuationVersion).where(ValuationVersion.id.in_(version_ids))
+            )
+        }
+        if version_ids
+        else {}
+    )
+    for item in detail_candidates:
         version_id = getattr(item, "valuation_version_id", None)
         if version_id is None:
             continue
-        version = session.get(ValuationVersion, version_id)
+        version = versions.get(version_id)
         if (
             version is not None
             and ValuationStatus(version.status) in IMMUTABLE_VERSION_STATUSES
