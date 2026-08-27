@@ -33,7 +33,6 @@ class MailSyncScheduler:
     def __init__(self, engine: Engine, app_settings: Settings) -> None:
         self.engine = engine
         self.app_settings = app_settings
-        self._last_interval_sync: datetime | None = None
         self._scheduled_triggered_today: set[str] = set()
         self._last_triggered_date: str = ""
 
@@ -85,12 +84,14 @@ class MailSyncScheduler:
         interval = schedule.get("interval_minutes", 30)
         if not isinstance(interval, int) or interval < 1:
             interval = 30
-        if self._last_interval_sync is None:
-            last = self._get_last_sync_time(session)
-            self._last_interval_sync = last
-        if self._last_interval_sync is None:
+        # Always read the last sync completion from the database so the
+        # interval measures from when the previous sync finished, not when
+        # it was enqueued. This prevents overlapping syncs when a sync takes
+        # longer than the poll interval.
+        last = self._get_last_sync_time(session)
+        if last is None:
             return True
-        elapsed = (now_utc - self._last_interval_sync).total_seconds()
+        elapsed = (now_utc - last).total_seconds()
         return elapsed >= interval * 60
 
     def _is_due_scheduled(
@@ -170,8 +171,16 @@ class MailSyncScheduler:
                 result=AuditResult.SUCCESS,
             )
         )
+        session.add(
+            AuditLog(
+                action="mail.sync_started",
+                resource_type="mail_sync",
+                resource_id=run_id,
+                summary={"trigger": "scheduler"},
+                result=AuditResult.SUCCESS,
+            )
+        )
         session.flush()
-        self._last_interval_sync = now
         logger.info("mail sync job enqueued by scheduler: %s", run_id)
 
 

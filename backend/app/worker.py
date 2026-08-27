@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import sys
 import time
 from collections.abc import Callable
 
@@ -13,6 +15,8 @@ from .config import Settings, get_settings
 from .db.session import create_engine
 from .imports.tasks import process_next_job
 from .system.health import record_worker_heartbeat
+
+logger = logging.getLogger(__name__)
 
 
 def _worker_id() -> str:
@@ -48,6 +52,7 @@ def run_worker(
     engine = create_engine(runtime.database_url)
     completed = 0
     worker_id = _worker_id()
+    logger.info("worker started (id=%s)", worker_id)
     try:
         while max_jobs is None or completed < max_jobs:
             with Session(engine) as session:
@@ -58,13 +63,29 @@ def run_worker(
                     break
                 sleep(idle_sleep_seconds)
                 continue
+            job, job_result = result
+            logger.info(
+                "job %s type=%s status=%s",
+                getattr(job, "id", "?"),
+                getattr(job, "job_type", "?"),
+                getattr(getattr(job, "status", None), "value", getattr(job, "status", "?")),
+            )
             completed += 1
+    except Exception:
+        logger.exception("worker loop crashed")
+        raise
     finally:
         engine.dispose()
+        logger.info("worker stopped after %d jobs", completed)
     return completed
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stdout,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(description="Fund dashboard import worker")
     parser.add_argument("--max-jobs", type=int, default=None)
     parser.add_argument("--idle-sleep", type=float, default=5.0)

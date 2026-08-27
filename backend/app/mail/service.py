@@ -58,6 +58,8 @@ class _SyncCounters:
     failed_attachments: int = 0
     failed_messages: int = 0
     batches_created: int = 0
+    bulk_header_round_trips: int = 0
+    bulk_header_failed_chunks: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
@@ -72,6 +74,8 @@ class _SyncCounters:
             "failed_attachments": self.failed_attachments,
             "failed_messages": self.failed_messages,
             "batches_created": self.batches_created,
+            "bulk_header_round_trips": self.bulk_header_round_trips,
+            "bulk_header_failed_chunks": self.bulk_header_failed_chunks,
             "error_count": len(self.errors),
             "error_codes": sorted(set(self.errors)),
         }
@@ -164,7 +168,9 @@ class MailService:
                 # Pre-screen every message with bulk header fetches and one
                 # batched database lookup, so a fully-known mailbox costs a
                 # handful of round trips instead of one per message.
-                external_ids = self._precompute_external_ids(connection, uids)
+                external_ids = self._precompute_external_ids(
+                    connection, uids, counters
+                )
                 known_ids = self._known_external_ids(
                     {eid for eid in external_ids.values()}
                 )
@@ -304,17 +310,29 @@ class MailService:
         )
 
     def _precompute_external_ids(
-        self, connection: Any, uids: list[str]
+        self,
+        connection: Any,
+        uids: list[str],
+        counters: _SyncCounters,
     ) -> dict[str, str]:
-        """Bulk-fetch Message-ID headers and map each UID to its external id."""
+        """Bulk-fetch Message-ID headers and map each UID to its external id.
+
+        If a bulk chunk fails, the caller falls back to per-UID header
+        fetches in ``_process_uid`` for the affected UIDs. The failure is
+        recorded in ``counters`` so operators can see it in the sync summary.
+        """
 
         external_ids: dict[str, str] = {}
         if not uids:
             return external_ids
+        chunk_count = (len(uids) + 499) // 500
         try:
             header_map = self.client.fetch_headers_bulk(connection, uids)
+            counters.bulk_header_round_trips += chunk_count
         except MailMessageError:
             header_map = {}
+            counters.bulk_header_failed_chunks += chunk_count
+            counters.errors.append("bulk_header_fetch_failed")
         for uid in uids:
             raw_headers = header_map.get(uid)
             if raw_headers is None:
@@ -714,6 +732,8 @@ class MailService:
             "failed_attachments",
             "failed_messages",
             "batches_created",
+            "bulk_header_round_trips",
+            "bulk_header_failed_chunks",
             "error_count",
             "error_codes",
         }
