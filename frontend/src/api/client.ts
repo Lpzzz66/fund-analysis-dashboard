@@ -86,12 +86,20 @@ export async function apiRequest<T>(
     body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${API_PREFIX}${path}`, {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 120000);
+  let response: Response;
+  try {
+    response = await fetch(`${API_PREFIX}${path}`, {
     ...options,
     body,
     credentials: "include",
     headers,
-  });
+      signal: options.signal ?? controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   if (response.status === 204) return undefined as T;
   const payload = await parseBody(response);

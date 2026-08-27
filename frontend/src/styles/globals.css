@@ -336,6 +336,38 @@ a:hover {
   color: var(--text-2);
 }
 
+.fd-mail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.fd-mail-meta strong {
+  color: var(--ink);
+  font-weight: 600;
+  margin-right: 12px;
+}
+.fd-mail-meta span:not(:first-child) {
+  border-left: 1px solid var(--rule);
+  padding-left: 16px;
+}
+@media (max-width: 640px) {
+  .fd-mail-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .fd-mail-meta span:not(:first-child) {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .fd-mail-meta strong {
+    margin-right: 0;
+  }
+}
+
 /* Truncate helper for dense table cells. Combined with a max-width on the
  * host cell, this keeps long audit-log summaries, file names and validation
  * messages from blowing the column out to the full viewport width. */
