@@ -42,6 +42,10 @@ class PublishRequest(BaseModel):
     confirm_warnings: bool = False
 
 
+class BatchPublishRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class ReasonRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
@@ -206,6 +210,34 @@ def publish_version(
             "superseded_version_ids": list(result.superseded_version_ids),
             "analysis_run_id": result.analysis_run_id,
             "validation_ignored_count": result.validation_ignored_count,
+        }
+    }
+
+
+@router.post("/reviews/batch-publish")
+def batch_publish(
+    payload: BatchPublishRequest,
+    context: ReviewOperator,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    """Publish every version currently waiting in the publishable queue."""
+
+    try:
+        result = PublishingService(session).publish_all_publishable(
+            actor_user_id=context.user.id,
+            actor_label=context.user.username,
+            reason=payload.reason,
+        )
+        session.commit()
+    except PublishingServiceError as exc:
+        session.rollback()
+        raise _error(exc) from exc
+    return {
+        "data": {
+            "requested": result.requested,
+            "published": result.published,
+            "failed": list(result.failed),
+            "ignored_findings": result.ignored_findings,
         }
     }
 

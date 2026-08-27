@@ -8,7 +8,7 @@ from .credential_store import (
     mail_credential_status,
     write_mail_credential,
 )
-from .service import MailService, MailSyncResult
+from .service import MailService, MailSyncAlreadyRunning, MailSyncResult
 
 __all__ = [
     "ImapClient",
@@ -19,6 +19,7 @@ __all__ = [
     "MailMessageError",
     "MailService",
     "MailSettings",
+    "MailSyncAlreadyRunning",
     "MailSyncResult",
     "mail_credential_status",
     "write_mail_credential",

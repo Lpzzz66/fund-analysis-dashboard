@@ -8,18 +8,21 @@ import ssl
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_db, require_roles
 from app.auth.service import AuthService
 from app.config import Settings
-from app.db.base import UserRole
+from app.db.base import JobStatus, UserRole
+from app.db.models import BackgroundJob
 from app.mail import (
     MailConfigurationError,
     MailConnectionError,
     MailCredentialStoreError,
     MailService,
     MailSettings,
+    MailSyncAlreadyRunning,
     mail_credential_status,
     write_mail_credential,
 )
@@ -244,12 +247,39 @@ def sync(
 ) -> dict[str, object]:
     try:
         settings = _mail_settings(session)
-        result = _service(request, session, settings).sync(context.user.id)
+        service = _service(request, session, settings)
+        if request.headers.get("x-async-sync") == "1":
+            result = service.enqueue_sync(context.user.id)
+        else:
+            result = service.sync(context.user.id)
         session.commit()
+    except MailSyncAlreadyRunning as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=f"mail_sync_already_running:{exc}") from None
     except MailConfigurationError:
         session.rollback()
         raise HTTPException(status_code=503, detail="Mail is not configured") from None
     return {"data": result.as_dict()}
+
+
+@router.post("/sync/{run_id}/cancel")
+def cancel_sync(
+    run_id: str,
+    context: MailOperator,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    job = session.scalar(
+        select(BackgroundJob).where(
+            BackgroundJob.job_type == "mail_sync",
+            BackgroundJob.resource_id == run_id,
+            BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+        )
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="mail_sync_not_running")
+    job.cancel_requested = True
+    session.commit()
+    return {"data": {"run_id": run_id, "status": "cancelling"}}
 
 
 @router.get("/sync-runs")

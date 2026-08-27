@@ -14,6 +14,8 @@ from app.analytics.service import AnalysisProcessResult, process_analysis_run
 from app.config import Settings
 from app.db.base import AnalysisRunStatus, AuditResult, ImportBatchStatus, JobStatus
 from app.db.models import AnalysisRun, AuditLog, BackgroundJob, ImportBatch
+from app.mail import MailService, MailSettings
+from app.system.settings import effective_mail_username
 
 from .processor import BatchProcessResult, process_import_batch
 
@@ -218,6 +220,28 @@ def process_next_job(
         elif job.job_type == "process_analysis_run":
             resource_id = int(job.resource_id)
             result = process_analysis_run(session, resource_id)
+        elif job.job_type == "mail_sync":
+            actor_user_id = session.scalar(
+                select(AuditLog.actor_user_id)
+                .where(
+                    AuditLog.resource_type == "mail_sync",
+                    AuditLog.resource_id == job.resource_id,
+                    AuditLog.action == "mail.sync_started",
+                )
+                .limit(1)
+            )
+            mail_settings = MailSettings.from_environment(
+                username_override=effective_mail_username(session)
+            )
+            result = MailService.from_app_settings(
+                session, settings, mail_settings
+            ).sync(
+                actor_user_id or 0,
+                run_id=job.resource_id,
+                job=job,
+            )
+            session.commit()
+            return job, result
         else:
             raise ValueError("unsupported_job_type")
         if not finish_job(session, job, lease_token=lease_token):
@@ -270,6 +294,8 @@ def process_next_job(
 
 
 def _processing_error_code(job: BackgroundJob) -> str:
+    if job.job_type == "mail_sync":
+        return "mail_sync_failed"
     return (
         "analysis_processing_failed"
         if job.job_type == "process_analysis_run"

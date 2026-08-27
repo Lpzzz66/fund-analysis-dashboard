@@ -1,6 +1,7 @@
 """Review, publication, revocation, and restoration workflows."""
 
 from .service import (
+    BatchPublicationResult,
     PublicationResult,
     PublishedVersionImmutableError,
     PublishingConflictError,
@@ -12,6 +13,7 @@ from .service import (
 )
 
 __all__ = [
+    "BatchPublicationResult",
     "PublicationResult",
     "PublishedVersionImmutableError",
     "PublishingConflictError",

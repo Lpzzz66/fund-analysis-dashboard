@@ -87,6 +87,10 @@ class MailSyncResult:
         return {"run_id": self.run_id, "status": self.status, **self.summary}
 
 
+class MailSyncAlreadyRunning(RuntimeError):
+    """Only one mailbox scan may run at a time."""
+
+
 class MailService:
     """Fetch mail read-only and delegate every accepted file to ImportService."""
 
@@ -127,15 +131,37 @@ class MailService:
         with self.client.open() as connection:
             self.client.select_readonly(connection)
 
-    def sync(self, actor_user_id: int) -> MailSyncResult:
+    def enqueue_sync(self, actor_user_id: int) -> MailSyncResult:
         self.settings.require_configured()
-        run_id, job = self._start_run(actor_user_id)
+        active = self.session.scalar(
+            select(BackgroundJob).where(
+                BackgroundJob.job_type == "mail_sync",
+                BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING, JobStatus.RETRY_DUE)),
+            ).order_by(BackgroundJob.id.desc()).limit(1)
+        )
+        if active is not None:
+            raise MailSyncAlreadyRunning(active.resource_id)
+        run_id, _job = self._start_run(actor_user_id, queued=True)
+        return MailSyncResult(run_id=run_id, status="queued", summary=_SyncCounters().as_dict())
+
+    def sync(
+        self,
+        actor_user_id: int,
+        *,
+        run_id: str | None = None,
+        job: BackgroundJob | None = None,
+    ) -> MailSyncResult:
+        self.settings.require_configured()
+        if run_id is None or job is None:
+            run_id, job = self._start_run(actor_user_id)
         counters = _SyncCounters()
 
         try:
             with self.client.open() as connection:
                 self.client.select_readonly(connection)
                 for uid in self.client.list_uids(connection):
+                    if self._cancel_requested(job.id):
+                        break
                     counters.messages_seen += 1
                     try:
                         with self.session.begin_nested():
@@ -167,41 +193,58 @@ class MailService:
             counters.failed_messages += 1
             counters.errors.append("sync_failed")
 
-        status = "failed" if counters.errors else "succeeded"
+        status = "cancelled" if self._cancel_requested(job.id) else "failed" if counters.errors else "succeeded"
         summary = counters.as_dict()
         self._finish_run(job, status, summary)
         return MailSyncResult(run_id=run_id, status=status, summary=summary)
 
     @staticmethod
     def list_sync_runs(session: Session, limit: int = 20) -> list[dict[str, object]]:
+        active_jobs = session.scalars(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.job_type == "mail_sync",
+                BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+            )
+            .order_by(BackgroundJob.created_at.desc(), BackgroundJob.id.desc())
+            .limit(min(max(limit, 1), 100))
+        ).all()
         audits = session.scalars(
             select(AuditLog)
             .where(
                 AuditLog.resource_type == "mail_sync",
-                AuditLog.action.in_(("mail.sync_completed", "mail.sync_failed")),
+                AuditLog.action.in_(("mail.sync_completed", "mail.sync_failed", "mail.sync_cancelled")),
             )
             .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .limit(min(max(limit, 1), 100))
         ).all()
-        return [
+        active = [
+            {
+                "run_id": job.resource_id,
+                "status": "running" if job.status == JobStatus.RUNNING else "queued",
+                "created_at": job.created_at,
+                **_SyncCounters().as_dict(),
+            }
+            for job in active_jobs
+        ]
+        completed = [
             {
                 "run_id": audit.resource_id,
-                "status": "failed"
-                if audit.action == "mail.sync_failed"
-                else "succeeded",
+                "status": "failed" if audit.action == "mail.sync_failed" else "cancelled" if audit.action == "mail.sync_cancelled" else "succeeded",
                 "created_at": audit.created_at,
-                "summary": MailService._public_summary(audit.summary),
+                **MailService._public_summary(audit.summary),
             }
             for audit in audits
         ]
+        return (active + completed)[:limit]
 
-    def _start_run(self, actor_user_id: int) -> tuple[str, BackgroundJob]:
+    def _start_run(self, actor_user_id: int, *, queued: bool = False) -> tuple[str, BackgroundJob]:
         run_id = uuid4().hex
         now = datetime.now(UTC)
         job = BackgroundJob(
             job_type="mail_sync",
             resource_id=run_id,
-            status=JobStatus.RUNNING,
+            status=JobStatus.PENDING if queued else JobStatus.RUNNING,
             attempts=1,
             max_attempts=1,
             started_at=now,
@@ -220,23 +263,28 @@ class MailService:
     def _finish_run(
         self, job: BackgroundJob, status: str, summary: dict[str, object]
     ) -> None:
-        job.status = JobStatus.SUCCEEDED if status == "succeeded" else JobStatus.FAILED
+        job.status = JobStatus.SUCCEEDED if status in {"succeeded", "cancelled"} else JobStatus.FAILED
         job.finished_at = datetime.now(UTC)
         job.locked_at = None
-        job.error_code = None if status == "succeeded" else "mail_sync_failed"
+        job.lease_token = None
+        job.next_retry_at = None
+        job.error_code = None if status in {"succeeded", "cancelled"} else "mail_sync_failed"
         self._record_audit(
-            action="mail.sync_completed"
-            if status == "succeeded"
-            else "mail.sync_failed",
+            action="mail.sync_completed" if status == "succeeded" else "mail.sync_cancelled" if status == "cancelled" else "mail.sync_failed",
             resource_type="mail_sync",
             resource_id=job.resource_id,
             actor_user_id=None,
             summary=summary,
-            result=AuditResult.SUCCESS
-            if status == "succeeded"
-            else AuditResult.FAILURE,
+            result=AuditResult.FAILURE if status == "failed" else AuditResult.SUCCESS,
         )
         self.session.flush()
+
+    def _cancel_requested(self, job_id: int) -> bool:
+        return bool(
+            self.session.scalar(
+                select(BackgroundJob.cancel_requested).where(BackgroundJob.id == job_id)
+            )
+        )
 
     def _process_uid(
         self,

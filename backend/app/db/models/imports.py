@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -125,5 +126,6 @@ class BackgroundJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_code: Mapped[str | None] = mapped_column(String(100))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     resource_id: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = created_at_column()

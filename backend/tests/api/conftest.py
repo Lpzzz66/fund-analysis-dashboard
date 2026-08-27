@@ -6,6 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.auth.dependencies import get_db
 from app.db.base import (
     Base,
@@ -26,9 +30,6 @@ from app.db.models import (
 from app.db.session import create_engine
 from app.main import create_app
 from app.publishing import PublishingService
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 @pytest.fixture()
@@ -134,7 +135,12 @@ def seed_published_fund(
         return fund.id, version.id
 
 
-def seed_pending_version(engine: object) -> tuple[int, int]:
+def seed_pending_version(
+    engine: object,
+    *,
+    fund_name: str = "待复核产品",
+    version_no: int = 1,
+) -> tuple[int, int]:
     with Session(engine) as session:
         from sqlalchemy import select
 
@@ -148,13 +154,13 @@ def seed_pending_version(engine: object) -> tuple[int, int]:
             )
             session.add(actor)
             session.flush()
-        fund = Fund(standard_name="待复核产品")
+        fund = Fund(standard_name=fund_name)
         session.add(fund)
         session.flush()
         version = ValuationVersion(
             fund_id=fund.id,
             valuation_date=date(2026, 8, 25),
-            version_no=1,
+            version_no=version_no,
             status=ValuationStatus.PENDING_REVIEW,
         )
         session.add(version)

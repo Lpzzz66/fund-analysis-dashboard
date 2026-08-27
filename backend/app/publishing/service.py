@@ -69,6 +69,14 @@ class ReviewResult:
     status: ValuationStatus
 
 
+@dataclass(frozen=True, slots=True)
+class BatchPublicationResult:
+    requested: int
+    published: int
+    failed: tuple[dict[str, object], ...]
+    ignored_findings: int
+
+
 IMMUTABLE_DETAIL_TYPES = (
     AccountSubjectDaily,
     FieldProvenance,
@@ -178,6 +186,48 @@ class PublishingService:
         if fund_id is not None:
             statement = statement.where(ValuationVersion.fund_id == fund_id)
         return tuple(self.session.scalars(statement).all())
+
+    def publish_all_publishable(
+        self,
+        *,
+        actor_user_id: int | None,
+        actor_label: str | None,
+        reason: str,
+    ) -> BatchPublicationResult:
+        """Publish the current publishable queue, isolating failures per version."""
+
+        normalized_reason = _required_reason(reason, "publication_reason_required")
+        version_ids = tuple(
+            self.session.scalars(
+                select(ValuationVersion.id)
+                .where(ValuationVersion.status == ValuationStatus.PUBLISHABLE)
+                .order_by(ValuationVersion.valuation_date, ValuationVersion.id)
+            ).all()
+        )
+        published = 0
+        ignored_findings = 0
+        failures: list[dict[str, object]] = []
+        for version_id in version_ids:
+            try:
+                result = self.publish_version(
+                    version_id,
+                    actor_user_id=actor_user_id,
+                    actor_label=actor_label,
+                    reason=normalized_reason,
+                    confirm_warnings=True,
+                    ignore_validations=True,
+                )
+            except PublishingServiceError as exc:
+                failures.append({"version_id": version_id, "error": str(exc)})
+                continue
+            published += 1
+            ignored_findings += result.validation_ignored_count
+        return BatchPublicationResult(
+            requested=len(version_ids),
+            published=published,
+            failed=tuple(failures),
+            ignored_findings=ignored_findings,
+        )
 
     def complete_review(
         self,
