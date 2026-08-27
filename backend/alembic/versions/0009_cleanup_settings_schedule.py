@@ -1,6 +1,6 @@
 """Remove dead settings and migrate mail_sync_interval_minutes to mail_sync_schedule.
 
-Revision ID: 0009_cleanup_settings_and_mail_schedule
+Revision ID: 0009_cleanup_settings_schedule
 Revises: 0008_mail_sync_cancel
 Create Date: 2026-08-27
 """
@@ -12,7 +12,7 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0009_cleanup_settings_and_mail_schedule"
+revision = "0009_cleanup_settings_schedule"
 down_revision = "0008_mail_sync_cancel"
 branch_labels = None
 depends_on = None
