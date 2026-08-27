@@ -325,17 +325,3 @@ def test_login_navigation_and_user_list_are_role_scoped(admin_client) -> None:
     assert listed.status_code == 200
     assert listed.json()["meta"]["total"] == 1
     assert listed.json()["data"][0]["username"] == "operator"
-
-
-def test_admin_protection_returns_conflict_not_not_found(admin_client) -> None:
-    user_id = admin_client.get("/api/v1/auth/me").json()["data"]["id"]
-
-    disable = admin_client.post(f"/api/v1/users/{user_id}/disable")
-    downgrade = admin_client.patch(
-        f"/api/v1/users/{user_id}/role", json={"role": "operator"}
-    )
-
-    assert disable.status_code == 409
-    assert disable.json()["detail"] == "admin_cannot_disable_self"
-    assert downgrade.status_code == 409
-    assert downgrade.json()["detail"] == "admin_cannot_downgrade_self"

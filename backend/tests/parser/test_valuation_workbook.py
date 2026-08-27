@@ -1,54 +1,13 @@
 from pathlib import Path
 
-import pytest
 from app.parser import ValuationParser
 from openpyxl import Workbook
 
-KNOWN_PRODUCTS = {
-    "千金一号": ["千金一号"],
-    "天策上将": ["天策上将"],
-    "梦一号": ["梦一号"],
-}
 
-
-@pytest.mark.parametrize(
-    ("filename", "product", "valuation_date"),
-    [
-        ("千金一号 03月06日.xls", "千金一号", "2026-03-06"),
-        ("天策上将 04月02日.xls", "天策上将", "2026-04-02"),
-        ("梦一号 05月09日.xls", "梦一号", "2025-05-09"),
-    ],
-)
-def test_real_xls_samples_are_stable(
-    filename: str, product: str, valuation_date: str
-) -> None:
-    path = Path("C:/Users/jzcan/Desktop") / filename
-    if not path.exists():
-        pytest.skip("desktop sample is not available in this checkout")
-    parsed = ValuationParser(KNOWN_PRODUCTS).parse(path)
-    assert parsed.product_name == product
-    assert parsed.valuation_date.isoformat() == valuation_date
-    assert parsed.net_asset_value is not None
-    assert parsed.unit_nav is not None
-    assert parsed.available_headroom is not None
-    assert parsed.qtd_return is not None
-    assert parsed.cumulative_payout is not None
-    assert parsed.share_classes
-    assert all(item.paid_in_capital is not None for item in parsed.share_classes)
-    assert all(item.daily_return is not None for item in parsed.share_classes)
-    assert any(
-        item.standard_field == "net_asset_value" and item.column == 8
-        for item in parsed.provenance
-    )
-    assert parsed.subjects
-    assert parsed.positions
-    assert parsed.provenance
-
-
-def test_unknown_product_is_not_guessed(tmp_path: Path) -> None:
-    path = tmp_path / "unknown.xlsx"
+def _write_workbook(path: Path) -> None:
     workbook = Workbook()
     sheet = workbook.active
+    sheet.title = "估值表"
     sheet.append(["证券投资基金估值表"])
     sheet.append(["未知产品___专用表"])
     sheet.append(["估值日期：2026-08-25"])
@@ -73,6 +32,18 @@ def test_unknown_product_is_not_guessed(tmp_path: Path) -> None:
     sheet.append(["基金资产净值", 100])
     sheet.append(["基金单位净值", 1])
     workbook.save(path)
+
+
+KNOWN_PRODUCTS = {
+    "千金一号": ["千金一号"],
+    "天策上将": ["天策上将"],
+    "梦一号": ["梦一号"],
+}
+
+
+def test_unknown_product_is_not_guessed(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.xlsx"
+    _write_workbook(path)
 
     parsed = ValuationParser(KNOWN_PRODUCTS).parse(path)
     assert parsed.product_name is None

@@ -35,6 +35,28 @@ tmp-audit-*.db
 tmp-audit-migration/
 tmp-batch-*.db
 
+# Ad-hoc scratch scripts and their outputs (unrelated to the dashboard repo)
+ag_filter.py
+inspect_ag.py
+inspect_small.py
+final_report.py
+extracted_full.txt
+ai_ag.json
+ai_ag_listing.txt
+six_tracks_final.json
+six_tracks_final.md
+local-auto-publish.xlsx
+
+# Local-only credentials, cookies, and build caches that must never be committed
+.local-cookies.txt
+.local-secrets/
+.vite/
+
+# Project uses npm (see package-lock.json); pnpm files were left behind from a
+# one-off pnpm experiment and must not be committed.
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
+
 # IDE and OS files
 .idea/
 .vscode/
