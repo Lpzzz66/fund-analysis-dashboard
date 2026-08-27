@@ -58,18 +58,24 @@ def run_worker(
             with Session(engine) as session:
                 result = process_next_job(session, runtime)
                 _record_heartbeat_if_supported(session, worker_id)
+                if result is not None:
+                    job, _ = result
+                    try:
+                        logger.info(
+                            "job %s type=%s status=%s",
+                            job.id,
+                            job.job_type,
+                            job.status.value
+                            if hasattr(job.status, "value")
+                            else job.status,
+                        )
+                    except Exception:  # noqa: BLE001 - logging must not crash worker
+                        logger.info("job processed (details unavailable)")
             if result is None:
                 if max_jobs is not None:
                     break
                 sleep(idle_sleep_seconds)
                 continue
-            job, job_result = result
-            logger.info(
-                "job %s type=%s status=%s",
-                getattr(job, "id", "?"),
-                getattr(job, "job_type", "?"),
-                getattr(getattr(job, "status", None), "value", getattr(job, "status", "?")),
-            )
             completed += 1
     except Exception:
         logger.exception("worker loop crashed")
