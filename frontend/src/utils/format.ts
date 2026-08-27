@@ -51,11 +51,23 @@ export function dateStr(value: string | null | undefined): string {
   return value.slice(0, 10);
 }
 
-/** Format an ISO datetime to YYYY-MM-DD HH:mm. */
+/** Format a backend UTC ISO datetime as Beijing local time. */
 export function timeStr(value: string | null | undefined): string {
   if (!value) return "—";
-  const d = value.slice(0, 16).replace("T", " ");
-  return d;
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }
 
 /** Sign-colored value for returns. */

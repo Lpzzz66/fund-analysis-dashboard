@@ -543,6 +543,16 @@ quality_status, analysis_status, analysis_run_id
 
 返回 `host`、`port`、`username`、`configured`、`credential_source`、`credential_writable` 和 `auto_sync_enabled`。永远不返回授权码。邮件连接环境变量不完整时仍返回安全的未配置状态。
 
+### `PUT /api/v1/mail/settings`（更新邮箱账号）
+
+仅管理员。请求体必须严格为：
+
+```json
+{"username":"funds@example.com"}
+```
+
+账号会去除首尾空白后以非敏感系统配置持久化；长度限制为 1--320。该接口只接受 `username`，不会接受或保存 IMAP（邮件接收协议）服务器、端口或密码字段。返回完整的非敏感邮箱设置，但永远不返回授权码。账号更新会记录脱敏审计事件 `mail.username_updated`；后续连接测试、立即同步和维护同步都会使用最新账号。
+
 ### `PUT /api/v1/mail/credential`（更新授权码）
 
 仅管理员。请求体必须严格为：

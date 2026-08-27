@@ -23,7 +23,7 @@ from app.mail import (
 from app.system.backup import BackupService
 from app.system.health import queue_summary
 from app.system.retention import RetentionService
-from app.system.settings import mail_sync_enabled
+from app.system.settings import effective_mail_username, mail_sync_enabled
 
 MAINTENANCE_COMMANDS = (
     "mail-sync",
@@ -185,7 +185,9 @@ class MaintenanceService:
     def _run_mail_sync(self) -> tuple[str, dict[str, object], str | None]:
         if not mail_sync_enabled(self.session):
             return "succeeded", {"skipped": True, "reason": "mail_sync_paused"}, None
-        mail_settings = MailSettings.from_environment()
+        mail_settings = MailSettings.from_environment(
+            username_override=effective_mail_username(self.session)
+        )
         result = MailService.from_app_settings(
             self.session,
             self.settings,

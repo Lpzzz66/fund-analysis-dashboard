@@ -2,6 +2,9 @@ import { apiRequest } from "./client";
 import type { ApiEnvelope, MailSettings, MailSyncResult } from "./types";
 
 export function getSettings() { return apiRequest<ApiEnvelope<MailSettings>>("/mail/settings"); }
+export function updateSettings(username: string) {
+  return apiRequest<ApiEnvelope<MailSettings>>("/mail/settings", { method: "PUT", body: { username } });
+}
 export function updateCredential(authorization_code: string) {
   return apiRequest<ApiEnvelope<{ configured: boolean; credential_source: string; credential_writable: boolean }>>("/mail/credential", { method: "PUT", body: { authorization_code } });
 }

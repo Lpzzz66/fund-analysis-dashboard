@@ -43,6 +43,8 @@ DEFAULT_VALUES: dict[str, object] = {
     "timezone": "Asia/Shanghai",
 }
 
+MAIL_USERNAME_SETTING = "mail_imap_username"
+
 RUNTIME_NOTE = (
     "The mail sync switch is read before every scheduled run. Other database-backed "
     "values are persisted but are not hot-applied by current worker processes."
@@ -150,12 +152,39 @@ def mail_sync_enabled(session: Session) -> bool:
     return value if isinstance(value, bool) else True
 
 
+def effective_mail_username(session: Session) -> str:
+    """Return the persisted IMAP username, falling back to the environment."""
+
+    state = session.get(SystemState, 1)
+    persisted = state.settings if state is not None else None
+    if isinstance(persisted, dict):
+        value = persisted.get(MAIL_USERNAME_SETTING)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return os.getenv("MAIL_IMAP_USERNAME", "").strip()
+
+
+def update_mail_username(session: Session, username: str) -> str:
+    """Persist one validated, non-sensitive IMAP username."""
+
+    normalized = username.strip()
+    if not normalized or len(normalized) > 320:
+        raise SystemSettingsError("invalid_mail_username")
+    state = _state(session)
+    current = state.settings if isinstance(state.settings, dict) else {}
+    state.settings = {**current, MAIL_USERNAME_SETTING: normalized}
+    session.flush()
+    return normalized
+
+
 __all__ = [
     "RUNTIME_NOTE",
     "SETTING_DEFINITIONS",
     "SystemSettingsError",
+    "effective_mail_username",
     "effective_settings",
     "mail_sync_enabled",
+    "update_mail_username",
     "update_settings",
     "validate_updates",
 ]

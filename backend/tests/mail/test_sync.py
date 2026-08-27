@@ -4,7 +4,13 @@ import os
 import stat
 
 import pytest
-from app.db.models import AuditLog, ImportBatch, SourceFile, SourceMessage
+from app.db.models import (
+    AuditLog,
+    ImportBatch,
+    SourceFile,
+    SourceMessage,
+    SystemState,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -36,6 +42,74 @@ def test_settings_are_redacted_and_test_connection_uses_database_dependency(
     assert connection.json() == {"data": {"connected": True}}
     assert fake_mailbox.connections[-1].selected_readonly is True
     assert fake_mailbox.connections[-1].logged_out is True
+
+
+def test_admin_can_update_mail_username_and_it_is_used_by_settings(
+    admin_client: TestClient,
+    fake_mailbox: FakeMailbox,
+    app_and_engine: tuple[object, object],
+) -> None:
+    response = admin_client.put(
+        "/api/v1/mail/settings",
+        json={"username": " updated@example.test "},
+    )
+    settings = admin_client.get("/api/v1/mail/settings")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["username"] == "updated@example.test"
+    assert settings.json()["data"]["username"] == "updated@example.test"
+    connection = admin_client.post("/api/v1/mail/test-connection")
+    assert connection.status_code == 200
+    assert fake_mailbox.connections[-1].logged_in_with == (
+        "updated@example.test",
+        "test-only-authorisation-code",
+    )
+
+    _, engine = app_and_engine
+    with Session(engine) as session:
+        state = session.get(SystemState, 1)
+        assert state is not None
+        assert state.settings["mail_imap_username"] == "updated@example.test"
+        audit = session.scalar(
+            select(AuditLog).where(AuditLog.action == "mail.username_updated")
+        )
+        assert audit is not None
+        assert audit.summary == {"changed_keys": ["username"]}
+
+
+def test_mail_username_update_is_admin_only_and_validated(
+    admin_client: TestClient,
+) -> None:
+    admin_client.post(
+        "/api/v1/users",
+        json={
+            "username": "mail-operator",
+            "password": "correct horse",
+            "role": "operator",
+        },
+    )
+    operator = TestClient(admin_client.app)
+    operator.post(
+        "/api/v1/auth/login",
+        json={"username": "mail-operator", "password": "correct horse"},
+    )
+
+    assert (
+        operator.put(
+            "/api/v1/mail/settings", json={"username": "other@example.test"}
+        ).status_code
+        == 403
+    )
+    assert (
+        admin_client.put("/api/v1/mail/settings", json={"username": "   "}).status_code
+        == 422
+    )
+    assert (
+        admin_client.put(
+            "/api/v1/mail/settings", json={"username": "a", "extra": True}
+        ).status_code
+        == 422
+    )
 
 
 def test_admin_can_store_authorization_code_without_exposing_it(

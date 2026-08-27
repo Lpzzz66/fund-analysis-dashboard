@@ -54,7 +54,7 @@ class MailSettings:
     max_message_bytes: int = 64 * 1024 * 1024
 
     @classmethod
-    def from_environment(cls) -> MailSettings:
+    def from_environment(cls, *, username_override: str | None = None) -> MailSettings:
         try:
             password = read_mail_credential()
         except MailCredentialStoreError as exc:
@@ -63,7 +63,11 @@ class MailSettings:
         return cls(
             host=os.getenv("MAIL_IMAP_HOST", "").strip(),
             port=_read_int("MAIL_IMAP_PORT", 993, 1, 65_535),
-            username=os.getenv("MAIL_IMAP_USERNAME", "").strip(),
+            username=(
+                username_override.strip()
+                if username_override is not None
+                else os.getenv("MAIL_IMAP_USERNAME", "").strip()
+            ),
             password=password,
             use_ssl=_read_bool("MAIL_IMAP_USE_SSL", True),
             mailbox=os.getenv("MAIL_IMAP_MAILBOX", "INBOX"),

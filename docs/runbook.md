@@ -21,7 +21,7 @@ cp deploy/.env.example deploy/.env
 chmod 600 deploy/.env
 ```
 
-编辑 `deploy/.env`，至少替换 `DASHBOARD_DOMAIN=danyintouzi.com`、`ACME_EMAIL`（证书通知邮箱）、`POSTGRES_PASSWORD`（数据库密码）、`DATABASE_URL` 中经过 URL 编码的同一密码、`MAIL_IMAP_USERNAME`（QQ 邮箱账号）和 IMAP（邮件接收协议）参数。不要把真实密码写入 shell（命令行解释器）历史或仓库。
+编辑 `deploy/.env`，至少替换 `DASHBOARD_DOMAIN=danyintouzi.com`、`ACME_EMAIL`（证书通知邮箱）、`POSTGRES_PASSWORD`（数据库密码）、`DATABASE_URL` 中经过 URL 编码的同一密码、IMAP（邮件接收协议）服务器参数。`MAIL_IMAP_USERNAME` 可作为初始账号，也可以在网页邮件接入页由管理员修改并持久化；不要把真实密码写入 shell（命令行解释器）历史或仓库。
 
 创建邮箱授权码文件：
 

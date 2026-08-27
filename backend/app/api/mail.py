@@ -20,7 +20,12 @@ from app.mail import (
     mail_credential_status,
     write_mail_credential,
 )
-from app.system.settings import mail_sync_enabled, update_settings
+from app.system.settings import (
+    effective_mail_username,
+    mail_sync_enabled,
+    update_mail_username,
+    update_settings,
+)
 
 router = APIRouter(prefix="/api/v1/mail", tags=["mail"])
 
@@ -34,8 +39,10 @@ MailOperator = Annotated[
 MailAdmin = Annotated[AuthContext, Depends(require_roles(UserRole.ADMIN))]
 
 
-def _mail_settings() -> MailSettings:
-    return MailSettings.from_environment()
+def _mail_settings(session: Session) -> MailSettings:
+    return MailSettings.from_environment(
+        username_override=effective_mail_username(session)
+    )
 
 
 def _service(request: Request, session: Session, settings: MailSettings) -> MailService:
@@ -48,32 +55,66 @@ def _service(request: Request, session: Session, settings: MailSettings) -> Mail
     )
 
 
-@router.get("/settings")
-def get_settings(_: MailReader, session: DatabaseSession) -> dict[str, object]:
+def _public_settings(session: Session) -> dict[str, object]:
     credential = mail_credential_status()
+    username = effective_mail_username(session)
     try:
-        settings = _mail_settings()
+        settings = _mail_settings(session)
     except MailConfigurationError:
         return {
-            "data": {
-                "host": "",
-                "port": 993,
-                "username": "",
-                **credential.as_dict(),
-                "configured": False,
-                "auto_sync_enabled": mail_sync_enabled(session),
-            }
-        }
-    return {
-        "data": {
-            "host": settings.host,
-            "port": settings.port,
-            "username": settings.username,
+            "host": "",
+            "port": 993,
+            "username": username,
             **credential.as_dict(),
-            "configured": settings.configured,
+            "configured": False,
             "auto_sync_enabled": mail_sync_enabled(session),
         }
+    return {
+        "host": settings.host,
+        "port": settings.port,
+        "username": settings.username,
+        **credential.as_dict(),
+        "configured": settings.configured,
+        "auto_sync_enabled": mail_sync_enabled(session),
     }
+
+
+@router.get("/settings")
+def get_settings(_: MailReader, session: DatabaseSession) -> dict[str, object]:
+    return {"data": _public_settings(session)}
+
+
+@router.put("/settings")
+async def update_settings_endpoint(
+    request: Request,
+    context: MailAdmin,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        payload = None
+    # The body is parsed manually so validation errors never echo an arbitrary
+    # extra field, which could contain a credential submitted to the wrong endpoint.
+    if not isinstance(payload, dict) or set(payload) != {"username"}:
+        raise HTTPException(status_code=422, detail="invalid_mail_username")
+    raw_username = payload.get("username")
+    if not isinstance(raw_username, str):
+        raise HTTPException(status_code=422, detail="invalid_mail_username")
+    try:
+        update_mail_username(session, raw_username)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    AuthService(session).record_audit(
+        action="mail.username_updated",
+        resource_type="mail_settings",
+        resource_id="imap",
+        actor_user_id=context.user.id,
+        summary={"changed_keys": ["username"]},
+    )
+    session.commit()
+    return {"data": _public_settings(session)}
 
 
 @router.put("/credential")
@@ -159,7 +200,7 @@ def test_connection(
     session: DatabaseSession,
 ) -> dict[str, object]:
     try:
-        settings = _mail_settings()
+        settings = _mail_settings(session)
         service = _service(request, session, settings)
         service.test_connection()
     except MailConfigurationError:
@@ -176,7 +217,7 @@ def sync(
     session: DatabaseSession,
 ) -> dict[str, object]:
     try:
-        settings = _mail_settings()
+        settings = _mail_settings(session)
         result = _service(request, session, settings).sync(context.user.id)
         session.commit()
     except MailConfigurationError:

@@ -291,14 +291,15 @@ def test_audit_query_is_read_only_filtered_and_redacts_sensitive_summary(
     assert admin_client.delete("/api/v1/audit-logs/1").status_code == 404
 
 
-def test_mail_settings_has_no_persistent_write_endpoint(
+def test_mail_settings_accepts_only_the_non_sensitive_username(
     admin_client: TestClient,
 ) -> None:
     response = admin_client.put(
         "/api/v1/mail/settings",
         json={"host": "imap.example.test", "password": "secret"},
     )
-    assert response.status_code == 405
+    assert response.status_code == 422
+    assert "secret" not in response.text
 
 
 def test_retention_preview_and_confirmed_execution_are_admin_only(
