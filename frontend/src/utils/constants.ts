@@ -163,9 +163,6 @@ export type RangeKey = (typeof RANGE_OPTIONS)[number]["value"];
 /** System setting whitelist with bounds (from system/settings.py). */
 export const SETTING_DEFINITIONS = {
   source_retention_days: { label: "原始文件保留天数", min: 1, max: 3650 },
-  task_concurrency: { label: "任务并发数", min: 1, max: 16 },
-  data_lateness_days: { label: "数据迟到容忍天数", min: 0, max: 30 },
-  mail_sync_interval_minutes: { label: "邮件同步间隔（分钟）", min: 1, max: 1440 },
   backup_retention_days: { label: "备份保留天数", min: 1, max: 3650 },
   timezone: { label: "时区" },
 } as const;

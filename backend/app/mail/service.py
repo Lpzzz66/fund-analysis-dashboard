@@ -294,6 +294,30 @@ class MailService:
         actor_user_id: int,
         counters: _SyncCounters,
     ) -> str:
+        # Phase 1: lightweight header-only fetch for deduplication
+        try:
+            raw_headers = self.client.fetch_headers(connection, uid)
+        except MailMessageError:
+            counters.failed_messages += 1
+            counters.errors.append("message_fetch_failed")
+            self._record_audit(
+                action="mail.message_failed",
+                resource_type="mail_sync",
+                resource_id=run_id,
+                actor_user_id=actor_user_id,
+                summary={"error_code": "message_fetch_failed", "uid": uid},
+                result=AuditResult.FAILURE,
+            )
+            return "failed"
+        external_id = self._extract_message_id_from_headers(raw_headers, uid)
+        if self.session.scalar(
+            select(SourceMessage.id).where(
+                SourceMessage.external_message_id == external_id
+            )
+        ):
+            return "skipped"
+
+        # Phase 2: full message fetch only for new messages
         try:
             raw_message = self.client.fetch_message(connection, uid)
         except MailMessageError:
@@ -309,13 +333,6 @@ class MailService:
             )
             return "failed"
         message = BytesParser(policy=policy.default).parsebytes(raw_message)
-        external_id = self._message_id(message, uid)
-        if self.session.scalar(
-            select(SourceMessage.id).where(
-                SourceMessage.external_message_id == external_id
-            )
-        ):
-            return "skipped"
 
         source_message = SourceMessage(
             external_message_id=external_id,
@@ -499,6 +516,20 @@ class MailService:
     @staticmethod
     def _message_id(message: Message, uid: str) -> str:
         raw_message_id = message.get("Message-ID")
+        candidate = str(raw_message_id).strip() if raw_message_id else f"imap-uid:{uid}"
+        if len(candidate) <= MAX_MESSAGE_ID_LENGTH:
+            return candidate
+        digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+        return f"message-id-sha256:{digest}"
+
+    @staticmethod
+    def _extract_message_id_from_headers(raw_headers: bytes, uid: str) -> str:
+        """Extract Message-ID from raw header bytes without full parsing."""
+
+        header_message = BytesParser(policy=policy.default).parsebytes(
+            raw_headers, headersonly=True
+        )
+        raw_message_id = header_message.get("Message-ID")
         candidate = str(raw_message_id).strip() if raw_message_id else f"imap-uid:{uid}"
         if len(candidate) <= MAX_MESSAGE_ID_LENGTH:
             return candidate

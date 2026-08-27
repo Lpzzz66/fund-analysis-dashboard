@@ -26,17 +26,16 @@ def test_settings_are_redacted_and_test_connection_uses_database_dependency(
     connection = admin_client.post("/api/v1/mail/test-connection")
 
     assert settings.status_code == 200
-    assert settings.json() == {
-        "data": {
-            "configured": True,
-            "host": "imap.example.test",
-            "port": 993,
-            "username": "funds@example.test",
-            "credential_source": "environment",
-            "credential_writable": False,
-            "auto_sync_enabled": True,
-        }
-    }
+    data = settings.json()["data"]
+    assert data["configured"] is True
+    assert data["host"] == "imap.example.test"
+    assert data["port"] == 993
+    assert data["username"] == "funds@example.test"
+    assert data["credential_source"] == "environment"
+    assert data["credential_writable"] is False
+    assert data["auto_sync_enabled"] is True
+    assert data["schedule"]["mode"] == "interval"
+    assert data["schedule"]["interval_minutes"] == 30
     assert "test-only-authorisation-code" not in settings.text
     assert connection.status_code == 200
     assert connection.json() == {"data": {"connected": True}}

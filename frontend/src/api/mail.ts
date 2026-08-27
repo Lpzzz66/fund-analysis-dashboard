@@ -1,5 +1,5 @@
 import { apiRequest } from "./client";
-import type { ApiEnvelope, MailSettings, MailSyncResult } from "./types";
+import type { ApiEnvelope, MailSettings, MailSyncResult, MailSyncSchedule } from "./types";
 
 export function getSettings() { return apiRequest<ApiEnvelope<MailSettings>>("/mail/settings"); }
 export function updateSettings(username: string) {
@@ -14,3 +14,6 @@ export function cancelSync(runId: string) { return apiRequest<ApiEnvelope<{ run_
 export function pause() { return apiRequest<ApiEnvelope<{ auto_sync_enabled: boolean }>>("/mail/pause", { method: "POST" }); }
 export function resume() { return apiRequest<ApiEnvelope<{ auto_sync_enabled: boolean }>>("/mail/resume", { method: "POST" }); }
 export function listSyncRuns() { return apiRequest<ApiEnvelope<MailSyncResult[]>>("/mail/sync-runs"); }
+export function updateSchedule(schedule: MailSyncSchedule) {
+  return apiRequest<ApiEnvelope<MailSettings>>("/mail/schedule", { method: "PUT", body: schedule });
+}

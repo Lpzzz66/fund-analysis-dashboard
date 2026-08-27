@@ -232,16 +232,20 @@ class DatabaseBackupAdapter:
 class BackupService:
     """Persist the most recent database backup status in ``AuditLog``."""
 
+    BACKUP_FILE_PATTERN = "database-*.dump"
+
     def __init__(
         self,
         session: Session,
         adapter: DatabaseBackupAdapter,
         *,
         actor_user_id: int | None = None,
+        retention_days: int = 30,
     ) -> None:
         self.session = session
         self.adapter = adapter
         self.actor_user_id = actor_user_id
+        self.retention_days = retention_days
 
     @classmethod
     def from_settings(
@@ -253,13 +257,73 @@ class BackupService:
         pg_dump_executable: str = "pg_dump",
         runner: CommandRunner | None = None,
     ) -> BackupService:
+        from app.db.models import SystemState
+
         adapter = DatabaseBackupAdapter(
             settings.database_url,
             Path(settings.database_backup_dir),
             pg_dump_executable=pg_dump_executable,
             runner=runner,
         )
-        return cls(session, adapter, actor_user_id=actor_user_id)
+        retention_days = 30
+        state = session.get(SystemState, 1)
+        if state is not None and isinstance(state.settings, dict):
+            raw = state.settings.get("backup_retention_days")
+            if isinstance(raw, int) and 1 <= raw <= 3650:
+                retention_days = raw
+        return cls(
+            session,
+            adapter,
+            actor_user_id=actor_user_id,
+            retention_days=retention_days,
+        )
+
+    def cleanup_old_backups(
+        self, *, now: datetime | None = None
+    ) -> dict[str, object]:
+        """Delete backup files older than ``retention_days``.
+
+        Only files matching ``database-*.dump`` in the backup root are
+        considered.  Errors are captured in the returned dict so callers can
+        decide whether to surface them.
+        """
+
+        current_time = now or datetime.now(UTC)
+        backup_root = self.adapter.backup_root
+        deleted_count = 0
+        deleted_bytes = 0
+        kept_count = 0
+        errors: list[str] = []
+        if not backup_root.is_dir():
+            return {
+                "deleted_count": 0,
+                "deleted_bytes": 0,
+                "kept_count": 0,
+                "errors": errors,
+            }
+        cutoff = current_time.timestamp() - self.retention_days * 86400
+        try:
+            for path in sorted(backup_root.glob(self.BACKUP_FILE_PATTERN)):
+                try:
+                    if not path.is_file():
+                        continue
+                    if path.stat().st_mtime < cutoff:
+                        size = path.stat().st_size
+                        path.unlink()
+                        deleted_count += 1
+                        deleted_bytes += size
+                    else:
+                        kept_count += 1
+                except OSError:
+                    errors.append(f"cleanup_failed:{path.name}")
+        except OSError:
+            errors.append("cleanup_scan_failed")
+        return {
+            "deleted_count": deleted_count,
+            "deleted_bytes": deleted_bytes,
+            "kept_count": kept_count,
+            "errors": errors,
+        }
 
     def run(
         self,
@@ -270,6 +334,7 @@ class BackupService:
         current_time = now or datetime.now(UTC)
         name = output_name or self._default_output_name(current_time)
         execution = self.adapter.execute(name)
+        cleanup = self.cleanup_old_backups(now=current_time)
         summary = {
             "status": execution.status.value,
             "backup_name": execution.target_path.name
@@ -280,6 +345,11 @@ class BackupService:
             "error_code": execution.error_code,
             "completed_at": current_time.isoformat(),
             "remote_source_backup": "not_configured",
+            "retention_days": self.retention_days,
+            "cleanup_deleted_count": cleanup["deleted_count"],
+            "cleanup_deleted_bytes": cleanup["deleted_bytes"],
+            "cleanup_kept_count": cleanup["kept_count"],
+            "cleanup_errors": cleanup["errors"],
         }
         audit = AuditLog(
             actor_user_id=self.actor_user_id,

@@ -583,6 +583,22 @@ quality_status, analysis_status, analysis_run_id
 
 管理员或业务员可读。返回同步运行数组，包含时间、处理数量、跳过数量和安全错误摘要；不会返回邮件正文或授权码。
 
+### `PUT /api/v1/mail/schedule`（修改定时同步）
+
+仅管理员。请求体为定时同步配置对象：
+
+```json
+{"mode":"interval","interval_minutes":30}
+```
+
+或：
+
+```json
+{"mode":"scheduled","times":[{"time":"09:00","days":[1,2,3,4,5]},{"time":"18:00","days":[]}]}
+```
+
+`mode` 必须为 `"interval"` 或 `"scheduled"`。间隔模式下 `interval_minutes` 范围 1--1440。定时模式下 `times` 每项 `time` 格式 `"HH:MM"`，`days` 为空数组表示每天，`[1,2,3,4,5]` 表示周一到周五。最多 10 个时间点。成功返回更新后的邮箱设置（含 `schedule` 字段）。
+
 ## 10. 系统设置、运维和审计
 
 ### `GET /api/v1/system/settings`（系统设置）
@@ -592,21 +608,26 @@ quality_status, analysis_status, analysis_run_id
 | 键 | 类型和范围 |
 |---|---|
 | `source_retention_days` | 整数，1--3650 |
-| `task_concurrency` | 整数，1--16 |
-| `data_lateness_days` | 整数，0--30 |
-| `mail_sync_interval_minutes` | 整数，1--1440 |
+| `mail_sync_schedule` | 对象（见下方邮件同步调度） |
 | `mail_sync_enabled` | 布尔值 |
 | `backup_retention_days` | 整数，1--3650 |
 | `timezone` | 已安装的时区名称 |
 
 每项格式为 `{"value":...,"source":"default|environment|database"}`。`meta.runtime_note` 会说明哪些值只是持久化配置、哪些会在当前进程中读取。
 
+`mail_sync_schedule` 支持两种模式：
+
+- 间隔模式：`{"mode":"interval","interval_minutes":30}`
+- 定时模式：`{"mode":"scheduled","times":[{"time":"09:00","days":[1,2,3,4,5]}]}`
+
+`days` 为空数组表示每天，`[1,2,3,4,5]` 表示周一到周五（ISO weekday，1=周一，7=周日）。
+
 ### `PATCH /api/v1/system/settings`（修改系统设置）
 
 仅管理员。可以直接传键值，也可以放在 `settings` 对象中，例如：
 
 ```json
-{"settings":{"mail_sync_enabled":false,"mail_sync_interval_minutes":30}}
+{"settings":{"mail_sync_enabled":false,"mail_sync_schedule":{"mode":"interval","interval_minutes":30}}}
 ```
 
 未知键、类型错误、范围错误和非法时区返回 `422`。成功返回完整有效设置、来源和运行时说明，并写审计。

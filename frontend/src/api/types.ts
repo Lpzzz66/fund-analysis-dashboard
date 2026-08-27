@@ -72,9 +72,18 @@ export interface ReviewItem {
   source_file_hash: string | null; source_file_size: number | null; import_batch_id: number | null;
   findings: ImportValidationFinding[];
 }
+export interface MailSyncScheduleTime {
+  time: string;
+  days: number[];
+}
+export interface MailSyncSchedule {
+  mode: "interval" | "scheduled";
+  interval_minutes?: number;
+  times?: MailSyncScheduleTime[];
+}
 export interface MailSettings {
   host: string; port: number; username: string; configured: boolean; credential_source: string;
-  credential_writable: boolean; auto_sync_enabled: boolean;
+  credential_writable: boolean; auto_sync_enabled: boolean; schedule?: MailSyncSchedule;
 }
 export interface MailSyncResult {
   run_id: string; status: string; messages_seen: number; messages_imported: number; messages_skipped: number;

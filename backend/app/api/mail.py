@@ -27,6 +27,7 @@ from app.mail import (
     write_mail_credential,
 )
 from app.system.settings import (
+    effective_mail_sync_schedule,
     effective_mail_username,
     mail_sync_enabled,
     update_mail_username,
@@ -65,6 +66,7 @@ def _service(request: Request, session: Session, settings: MailSettings) -> Mail
 def _public_settings(session: Session) -> dict[str, object]:
     credential = mail_credential_status()
     username = effective_mail_username(session)
+    schedule = effective_mail_sync_schedule(session)
     try:
         settings = _mail_settings(session)
     except MailConfigurationError:
@@ -75,6 +77,7 @@ def _public_settings(session: Session) -> dict[str, object]:
             **credential.as_dict(),
             "configured": False,
             "auto_sync_enabled": mail_sync_enabled(session),
+            "schedule": schedule,
         }
     return {
         "host": settings.host,
@@ -83,6 +86,7 @@ def _public_settings(session: Session) -> dict[str, object]:
         **credential.as_dict(),
         "configured": settings.configured,
         "auto_sync_enabled": mail_sync_enabled(session),
+        "schedule": schedule,
     }
 
 
@@ -288,3 +292,35 @@ def sync_runs(
     session: DatabaseSession,
 ) -> dict[str, object]:
     return {"data": MailService.list_sync_runs(session)}
+
+
+@router.put("/schedule")
+async def update_schedule(
+    request: Request,
+    context: MailAdmin,
+    session: DatabaseSession,
+) -> dict[str, object]:
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="invalid_schedule") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="invalid_schedule")
+    try:
+        update_settings(
+            session,
+            request.app.state.settings,
+            {"mail_sync_schedule": payload},
+        )
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    AuthService(session).record_audit(
+        action="mail.schedule_updated",
+        resource_type="mail_settings",
+        resource_id="imap",
+        actor_user_id=context.user.id,
+        summary={"changed_keys": ["mail_sync_schedule"]},
+    )
+    session.commit()
+    return {"data": _public_settings(session)}

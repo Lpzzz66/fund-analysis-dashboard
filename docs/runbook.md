@@ -86,9 +86,9 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-d
 docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps api python -m app.maintenance_cli job-summary
 ```
 
-`source-retention` 默认是预演；只有指定 `--apply` 才删除通过所有安全检查的原始对象。当前没有独立调度器容器，建议使用 root（系统管理员）保护的 `cron`（定时任务）或 `systemd timer`（系统定时器），配置超时、单实例锁和失败告警。推荐邮件每 5 分钟、数据库备份每天 02:30、源文件预演每天 03:30；邮件暂停开关会让 `mail-sync` 安全跳过。
+`source-retention` 默认是预演；只有指定 `--apply` 才删除通过所有安全检查的原始对象。邮件同步已内置定时调度器（API 进程启动时自动运行），支持"每 N 分钟"和"指定时间点 + 星期几"两种模式，可在邮件接入页面配置。数据库备份和源文件清理仍建议使用 root（系统管理员）保护的 `cron`（定时任务）或 `systemd timer`（系统定时器），配置超时、单实例锁和失败告警。推荐数据库备份每天 02:30、源文件预演每天 03:30；邮件暂停开关会让调度器和手动同步安全跳过。
 
-后端会生成并审计数据库备份，但不会根据 `backup_retention_days`（备份保留天数）自动删除旧 `.dump` 文件；备份轮转必须由单独的受控宿主机任务完成。该设置可维护，但不代表已自动轮转。
+后端每次创建数据库备份后会自动根据 `backup_retention_days`（备份保留天数）清理过期的 `database-*.dump` 文件。清理结果记录在备份审计摘要中。该设置在系统设置页面可调整，默认 30 天。
 
 ## 6. 备份和清理
 
@@ -99,7 +99,7 @@ docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-d
 docker compose --env-file deploy/.env -f deploy/compose.prod.yml run --rm --no-deps -T api sh -c 'latest=$(ls -1t /var/lib/fund-dashboard/backups/database-*.dump | head -n 1) && pg_restore --list "$latest" >/dev/null'
 ```
 
-备份轮转只能针对备份卷内名称匹配 `database-*.dump` 且超过批准保留期的文件；禁止把删除范围扩大到整个数据卷。首次启用自动轮转前应在非生产目录演练。
+备份轮转现在由后端自动执行：每次 `database-backup` 成功后，系统会删除备份卷内名称匹配 `database-*.dump` 且超过 `backup_retention_days` 保留期的文件。删除结果记录在审计摘要中。禁止把删除范围扩大到整个数据卷。
 
 原始 Excel 默认保留 365 天，可由 `SOURCE_RETENTION_DAYS` 或系统设置调整。清理服务不会删除数据库标准化数据、估值版本、分析结果、任务和审计，并会检查待复核引用、活动/失败任务、审计锁、源文件备份审计和对象路径安全。当前没有异地源文件备份适配器，没有成功备份审计时会以 `backup_incomplete`（备份未完成）跳过，不能手工绕过。
 

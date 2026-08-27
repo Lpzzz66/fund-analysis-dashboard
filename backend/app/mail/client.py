@@ -109,3 +109,23 @@ class ImapClient:
                     raise MailMessageError("message_too_large")
                 return raw_message
         raise MailMessageError("imap_fetch_failed")
+
+    def fetch_headers(self, connection: Any, uid: str) -> bytes:
+        """Fetch only the Message-ID header for lightweight deduplication."""
+
+        try:
+            status, data = connection.uid(
+                "fetch", uid, "(BODY[HEADER.FIELDS (MESSAGE-ID)])"
+            )
+        except Exception as exc:
+            raise MailMessageError("imap_fetch_failed") from exc
+        if status != "OK":
+            raise MailMessageError("imap_fetch_failed")
+        for item in data or []:
+            if (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and isinstance(item[1], bytes)
+            ):
+                return item[1]
+        raise MailMessageError("imap_fetch_failed")

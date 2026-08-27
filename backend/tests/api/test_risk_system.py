@@ -204,7 +204,7 @@ def test_system_settings_are_whitelisted_persisted_and_admin_only(
         "/api/v1/system/settings",
         json={
             "source_retention_days": 180,
-            "task_concurrency": 2,
+            "backup_retention_days": 60,
             "timezone": "UTC",
         },
     )
@@ -223,7 +223,7 @@ def test_system_settings_are_whitelisted_persisted_and_admin_only(
         assert state is not None
         assert state.settings == {
             "source_retention_days": 180,
-            "task_concurrency": 2,
+            "backup_retention_days": 60,
             "timezone": "UTC",
         }
 
@@ -235,7 +235,7 @@ def test_system_settings_are_whitelisted_persisted_and_admin_only(
     )
     assert (
         admin_client.patch(
-            "/api/v1/system/settings", json={"task_concurrency": 0}
+            "/api/v1/system/settings", json={"source_retention_days": 0}
         ).status_code
         == 422
     )

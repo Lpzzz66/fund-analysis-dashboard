@@ -1,17 +1,51 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Input, Modal, Space, Table, Tag, Divider, Progress } from "antd";
+import { Alert, Button, Card, Checkbox, Divider, Input, InputNumber, Modal, Radio, Space, Table, Tag, Progress, TimePicker } from "antd";
+import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import * as mailApi from "@/api/mail";
 import { apiErrorMessage } from "@/api/client";
-import type { MailSettings, MailSyncResult } from "@/api/types";
+import type { MailSettings, MailSyncResult, MailSyncSchedule, MailSyncScheduleTime } from "@/api/types";
 import { PageHeader, useToast } from "@/components";
 import { useAuth } from "@/app/auth";
 import { timeStr } from "@/utils/format";
 
+const DAY_LABELS = ["每天", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
 export default function Mail() {
   const { session } = useAuth(); const isAdmin = session?.role === "admin";
   const toast = useToast();
-  const [settings, setSettings] = useState<MailSettings | null>(null); const [runs, setRuns] = useState<MailSyncResult[]>([]); const [username, setUsername] = useState(""); const [code, setCode] = useState(""); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [activeAction, setActiveAction] = useState<string | null>(null); const [activeRunId, setActiveRunId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
-  async function load() { setLoading(true); try { const [s, r] = await Promise.all([mailApi.getSettings(), mailApi.listSyncRuns()]); setSettings(s.data); setUsername(s.data.username); setRuns(r.data); } catch { setError("邮件设置加载失败，请刷新重试"); } finally { setLoading(false); } }
+  const [settings, setSettings] = useState<MailSettings | null>(null);
+  const [runs, setRuns] = useState<MailSyncResult[]>([]);
+  const [username, setUsername] = useState("");
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Schedule state
+  const [scheduleMode, setScheduleMode] = useState<"interval" | "scheduled">("interval");
+  const [intervalMinutes, setIntervalMinutes] = useState(30);
+  const [scheduleTimes, setScheduleTimes] = useState<MailSyncScheduleTime[]>([]);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [s, r] = await Promise.all([mailApi.getSettings(), mailApi.listSyncRuns()]);
+      setSettings(s.data);
+      setUsername(s.data.username);
+      setRuns(r.data);
+      const sch = s.data.schedule;
+      if (sch) {
+        setScheduleMode(sch.mode);
+        if (sch.mode === "interval") setIntervalMinutes(sch.interval_minutes ?? 30);
+        if (sch.mode === "scheduled") setScheduleTimes(sch.times ?? []);
+      }
+      setScheduleDirty(false);
+    } catch { setError("邮件设置加载失败，请刷新重试"); } finally { setLoading(false); }
+  }
+
   useEffect(() => { void load(); }, []);
   useEffect(() => {
     const running = runs.find((run) => run.status === "queued" || run.status === "running");
@@ -23,12 +57,154 @@ export default function Mail() {
     const timer = window.setInterval(() => { void mailApi.listSyncRuns().then((result) => setRuns(result.data)).catch(() => undefined); }, 2000);
     return () => window.clearInterval(timer);
   }, [activeRunId]);
+
   async function saveUsername() { if (!username.trim()) return; setBusy(true); try { await mailApi.updateSettings(username); await load(); } catch { setError("邮箱账号保存失败，请检查账号格式"); } finally { setBusy(false); } }
   async function saveCode() { if (!code.trim()) return; setBusy(true); try { await mailApi.updateCredential(code); setCode(""); await load(); } catch { setError("授权码保存失败，未显示或记录授权码"); } finally { setBusy(false); } }
-  async function test() { setError(null); setBusy(true); setActiveAction("连接测试"); try { await mailApi.testConnection(); toast.success("邮箱连接测试成功"); await load(); } catch (cause) { const detail = apiErrorMessage(cause, ""); const messages: Record<string, string> = { mail_not_configured: "邮箱服务器、账号或授权码未配置", mail_credential_unavailable: "授权码文件不可读，请检查文件权限和挂载", mail_connection_timeout: "连接邮箱服务器超时，请检查容器外网出口", mail_dns_failed: "无法解析邮箱服务器地址，请检查 DNS（域名解析）", mail_tls_failed: "邮箱服务器安全连接失败，请检查 SSL（安全连接）设置", mail_connection_failed: "邮箱服务器连接失败，请检查网络和服务器配置" }; setError(messages[detail] ?? "邮件连接测试失败，请检查服务器配置和网络"); } finally { setBusy(false); setActiveAction(null); } }
-  async function sync() { setError(null); setBusy(true); setActiveAction("同步"); try { const result = await mailApi.syncNow(); const run = result.data; setActiveRunId(run.run_id); await load(); Modal.info({ title: "邮件同步已开始", content: "这是一个较长流程，系统会在后台持续处理。你可以离开当前页面，稍后在“同步记录”中查看结果。", okText: "知道了" }); } catch (cause) { setError(apiErrorMessage(cause, "邮件同步启动失败，请稍后重试")); } finally { setBusy(false); setActiveAction(null); } }
+  async function test() { setError(null); setBusy(true); setActiveAction("连接测试"); try { await mailApi.testConnection(); toast.success("邮箱连接测试成功"); await load(); } catch (cause) { const detail = apiErrorMessage(cause, ""); const messages: Record<string, string> = { mail_not_configured: "邮箱服务器、账号或授权码未配置", mail_credential_unavailable: "授权码文件不可读，请检查文件权限和挂载", mail_connection_timeout: "连接邮箱服务器超时，请检查容器外网出口", mail_dns_failed: "无法解析邮箱服务器地址，请检查 DNS（域名解析）设置", mail_tls_failed: "邮箱服务器安全连接失败，请检查 SSL（安全连接）设置", mail_connection_failed: "邮箱服务器连接失败，请检查网络和服务器配置" }; setError(messages[detail] ?? "邮件连接测试失败，请检查服务器配置和网络"); } finally { setBusy(false); setActiveAction(null); } }
+  async function sync() { setError(null); setBusy(true); setActiveAction("同步"); try { const result = await mailApi.syncNow(); const run = result.data; setActiveRunId(run.run_id); await load(); Modal.info({ title: "邮件同步已开始", content: "这是一个较长流程，系统会在后台持续处理。你可以离开当前页面，稍后在\u201C同步记录\u201D中查看结果。", okText: "知道了" }); } catch (cause) { setError(apiErrorMessage(cause, "邮件同步启动失败，请稍后重试")); } finally { setBusy(false); setActiveAction(null); } }
   async function cancelSync() { if (!activeRunId) return; setBusy(true); try { await mailApi.cancelSync(activeRunId); toast.success("已发送中断请求，系统会在当前邮件处理完成后停止"); await load(); } catch { setError("中断请求发送失败，请稍后重试"); } finally { setBusy(false); } }
   async function toggle() { setBusy(true); try { if (settings?.auto_sync_enabled) await mailApi.pause(); else await mailApi.resume(); await load(); } catch { setError("自动同步状态更新失败"); } finally { setBusy(false); } }
+
+  async function saveSchedule() {
+    setBusy(true);
+    try {
+      const schedule: MailSyncSchedule = scheduleMode === "interval"
+        ? { mode: "interval", interval_minutes: intervalMinutes }
+        : { mode: "scheduled", times: scheduleTimes };
+      await mailApi.updateSchedule(schedule);
+      toast.success("定时同步设置已保存");
+      setScheduleDirty(false);
+      await load();
+    } catch (cause) {
+      setError(apiErrorMessage(cause, "定时同步设置保存失败"));
+    } finally { setBusy(false); }
+  }
+
+  function addTimeEntry() {
+    setScheduleTimes([...scheduleTimes, { time: "09:00", days: [] }]);
+    setScheduleDirty(true);
+  }
+  function removeTimeEntry(index: number) {
+    setScheduleTimes(scheduleTimes.filter((_, i) => i !== index));
+    setScheduleDirty(true);
+  }
+  function updateTimeEntry(index: number, time: string) {
+    const updated = [...scheduleTimes];
+    updated[index] = { ...updated[index], time };
+    setScheduleTimes(updated);
+    setScheduleDirty(true);
+  }
+  function updateDays(index: number, days: number[]) {
+    const updated = [...scheduleTimes];
+    updated[index] = { ...updated[index], days };
+    setScheduleTimes(updated);
+    setScheduleDirty(true);
+  }
+
   const syncRunning = Boolean(activeRunId);
-  return <div className="fd-page"><PageHeader title="邮件接入" desc="管理专用邮箱账号、授权码、连接测试和附件同步" />{error && <Alert type="error" showIcon closable onClose={() => setError(null)} message={error} />}<Card loading={loading} title="邮箱设置" extra={<Tag color={settings?.configured ? "success" : "default"}>{settings?.configured ? "已配置" : "未配置"}</Tag>}><Space direction="vertical" size={16} style={{ width: "100%" }}><div className="fd-mail-meta"><span>服务器</span><strong>{settings?.host || "未配置"}:{settings?.port ?? "—"}</strong><span>当前账号</span><strong>{settings?.username || "未配置"}</strong><span>自动同步</span><Tag color={settings?.auto_sync_enabled ? "green" : "default"}>{settings?.auto_sync_enabled ? "运行中" : "已暂停"}</Tag></div><Divider style={{ margin: 0 }} /><section><div className="fd-section-title">账号配置</div><Space wrap style={{ marginTop: 10 }}><Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="输入邮箱账号" autoComplete="username" disabled={!isAdmin || syncRunning} style={{ width: 280 }} />{isAdmin && <Button type="primary" loading={busy} disabled={syncRunning} onClick={() => void saveUsername()}>保存账号</Button>}</Space></section><section><div className="fd-section-title">授权码与连接</div><Space wrap style={{ marginTop: 10 }}>{isAdmin && <><Input.Password value={code} onChange={(e) => setCode(e.target.value)} placeholder="输入邮箱授权码" autoComplete="new-password" style={{ width: 280 }} disabled={syncRunning} /><Button type="primary" loading={busy} disabled={syncRunning} onClick={() => void saveCode()}>保存授权码</Button><Button loading={busy && activeAction === "连接测试"} disabled={busy || syncRunning} onClick={() => void test()}>测试连接</Button></>}</Space></section><section><div className="fd-section-title">同步控制</div><Space wrap style={{ marginTop: 10 }}>{syncRunning ? <Button danger type="primary" loading={busy} onClick={() => void cancelSync()}>中断同步</Button> : <Button type="primary" loading={busy && activeAction === "同步"} disabled={busy} onClick={() => void sync()}>立即同步</Button>}{isAdmin && <Button loading={busy && activeAction === "切换"} disabled={busy || syncRunning} onClick={() => void toggle()}>{settings?.auto_sync_enabled ? "暂停同步" : "恢复同步"}</Button>}{syncRunning ? <span className="fd-sync-running"><span className="fd-sync-running__dot" />后台同步进行中，可安全离开此页面</span> : <span className="fd-caption">同步将读取收件箱并处理可识别的表格附件</span>}</Space>{syncRunning && <Progress percent={100} status="active" showInfo={false} strokeColor="#c23b3b" style={{ maxWidth: 420, marginTop: 10 }} />}</section></Space></Card><Card style={{ marginTop: 12 }} title="同步记录"><Table rowKey="run_id" size="small" loading={loading} dataSource={runs} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[{ title: "运行编号", dataIndex: "run_id" }, { title: "状态", dataIndex: "status", render: (value: string) => value === "running" ? <Tag color="processing">运行中</Tag> : value === "queued" ? <Tag>排队中</Tag> : value === "cancelled" ? <Tag>已中断</Tag> : value === "failed" ? <Tag color="error">失败</Tag> : <Tag color="success">已完成</Tag> }, { title: "创建时间", dataIndex: "created_at", render: timeStr }, { title: "发现邮件", dataIndex: "messages_seen" }, { title: "导入附件", dataIndex: "attachments_imported" }, { title: "失败附件", dataIndex: "failed_attachments" }, { title: "错误数", dataIndex: "error_count" }]} /></Card></div>;
+
+  return (
+    <div className="fd-page">
+      <PageHeader title="邮件接入" desc="管理专用邮箱账号、授权码、连接测试和附件同步" />
+      {error && <Alert type="error" showIcon closable onClose={() => setError(null)} message={error} />}
+      <Card loading={loading} title="邮箱设置" extra={<Tag color={settings?.configured ? "success" : "default"}>{settings?.configured ? "已配置" : "未配置"}</Tag>}>
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <div className="fd-mail-meta">
+            <span>服务器</span><strong>{settings?.host || "未配置"}:{settings?.port ?? "—"}</strong>
+            <span>当前账号</span><strong>{settings?.username || "未配置"}</strong>
+            <span>自动同步</span><Tag color={settings?.auto_sync_enabled ? "green" : "default"}>{settings?.auto_sync_enabled ? "运行中" : "已暂停"}</Tag>
+          </div>
+          <Divider style={{ margin: 0 }} />
+          <section>
+            <div className="fd-section-title">账号配置</div>
+            <Space wrap style={{ marginTop: 10 }}>
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="输入邮箱账号" autoComplete="username" disabled={!isAdmin || syncRunning} style={{ width: 280 }} />
+              {isAdmin && <Button type="primary" loading={busy} disabled={syncRunning} onClick={() => void saveUsername()}>保存账号</Button>}
+            </Space>
+          </section>
+          <section>
+            <div className="fd-section-title">授权码与连接</div>
+            <Space wrap style={{ marginTop: 10 }}>
+              {isAdmin && <>
+                <Input.Password value={code} onChange={(e) => setCode(e.target.value)} placeholder="输入邮箱授权码" autoComplete="new-password" style={{ width: 280 }} disabled={syncRunning} />
+                <Button type="primary" loading={busy} disabled={syncRunning} onClick={() => void saveCode()}>保存授权码</Button>
+                <Button loading={busy && activeAction === "连接测试"} disabled={busy || syncRunning} onClick={() => void test()}>测试连接</Button>
+              </>}
+            </Space>
+          </section>
+          <section>
+            <div className="fd-section-title">同步控制</div>
+            <Space wrap style={{ marginTop: 10 }}>
+              {syncRunning
+                ? <Button danger type="primary" loading={busy} onClick={() => void cancelSync()}>中断同步</Button>
+                : <Button type="primary" loading={busy && activeAction === "同步"} disabled={busy} onClick={() => void sync()}>立即同步</Button>}
+              {isAdmin && <Button loading={busy && activeAction === "切换"} disabled={busy || syncRunning} onClick={() => void toggle()}>{settings?.auto_sync_enabled ? "暂停同步" : "恢复同步"}</Button>}
+              {syncRunning
+                ? <span className="fd-sync-running"><span className="fd-sync-running__dot" />后台同步进行中，可安全离开此页面</span>
+                : <span className="fd-caption">同步将读取收件箱并处理可识别的表格附件</span>}
+            </Space>
+            {syncRunning && <Progress percent={100} status="active" showInfo={false} strokeColor="#c23b3b" style={{ maxWidth: 420, marginTop: 10 }} />}
+          </section>
+          {isAdmin && (
+            <section>
+              <div className="fd-section-title">定时同步</div>
+              <Space direction="vertical" size={12} style={{ marginTop: 10, width: "100%" }}>
+                <Radio.Group
+                  value={scheduleMode}
+                  onChange={(e) => { setScheduleMode(e.target.value); setScheduleDirty(true); }}
+                  disabled={syncRunning}
+                >
+                  <Radio value="interval">每 N 分钟</Radio>
+                  <Radio value="scheduled">指定时间点</Radio>
+                </Radio.Group>
+                {scheduleMode === "interval" ? (
+                  <Space>
+                    <span>每隔</span>
+                    <InputNumber min={1} max={1440} value={intervalMinutes} onChange={(v) => { if (v) { setIntervalMinutes(v); setScheduleDirty(true); } }} disabled={syncRunning} style={{ width: 100 }} />
+                    <span>分钟同步一次</span>
+                  </Space>
+                ) : (
+                  <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                    {scheduleTimes.map((entry, index) => (
+                      <Space key={index} wrap align="center">
+                        <TimePicker
+                          format="HH:mm"
+                          value={dayjs(entry.time, "HH:mm")}
+                          onChange={(v) => { if (v) updateTimeEntry(index, v.format("HH:mm")); }}
+                          disabled={syncRunning}
+                          allowClear={false}
+                          minuteStep={5}
+                        />
+                        <Checkbox.Group
+                          options={DAY_LABELS.slice(1).map((label, i) => ({ label, value: i + 1 }))}
+                          value={entry.days}
+                          onChange={(v) => updateDays(index, v as number[])}
+                          disabled={syncRunning}
+                        />
+                        <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeTimeEntry(index)} disabled={syncRunning} />
+                      </Space>
+                    ))}
+                    <Button size="small" icon={<PlusOutlined />} onClick={addTimeEntry} disabled={syncRunning || scheduleTimes.length >= 10}>添加时间点</Button>
+                    <span className="fd-caption">不勾选星期表示每天执行。时间按系统时区（{settings?.schedule?.mode === "scheduled" ? "已配置" : "Asia/Shanghai"}）解释。</span>
+                  </Space>
+                )}
+                <Button type="primary" loading={busy} disabled={syncRunning || !scheduleDirty} onClick={() => void saveSchedule()}>保存定时设置</Button>
+              </Space>
+            </section>
+          )}
+        </Space>
+      </Card>
+      <Card style={{ marginTop: 12 }} title="同步记录">
+        <Table rowKey="run_id" size="small" loading={loading} dataSource={runs} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
+          { title: "运行编号", dataIndex: "run_id" },
+          { title: "状态", dataIndex: "status", render: (value: string) => value === "running" ? <Tag color="processing">运行中</Tag> : value === "queued" ? <Tag>排队中</Tag> : value === "cancelled" ? <Tag>已中断</Tag> : value === "failed" ? <Tag color="error">失败</Tag> : <Tag color="success">已完成</Tag> },
+          { title: "创建时间", dataIndex: "created_at", render: timeStr },
+          { title: "发现邮件", dataIndex: "messages_seen" },
+          { title: "导入附件", dataIndex: "attachments_imported" },
+          { title: "失败附件", dataIndex: "failed_attachments" },
+          { title: "错误数", dataIndex: "error_count" },
+        ]} />
+      </Card>
+    </div>
+  );
 }
