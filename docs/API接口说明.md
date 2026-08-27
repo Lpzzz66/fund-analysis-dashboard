@@ -537,7 +537,7 @@ quality_status, analysis_status, analysis_run_id
 
 ## 9. 邮件接入
 
-设置查看、同步记录、测试和同步只允许 `admin`、`operator`；授权码更新和自动同步开关只允许 `admin`。
+设置查看、同步记录和立即同步允许 `admin`、`operator`；账号、授权码、连接测试和自动同步开关只允许 `admin`。
 
 ### `GET /api/v1/mail/settings`（非敏感邮箱设置）
 
