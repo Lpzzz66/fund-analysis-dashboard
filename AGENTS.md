@@ -8,9 +8,9 @@
 
 ## 当前生产版本
 
-- 部署 commit：`fd28079 feat: batch publish and background mail sync`
-- 部署日期：2026-08-27（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 fd28079165db26c11eae94dbeec364b476175a59）
-- 本地发布标签：`prod-20260827-<commit>`（在每次部署后由部署者在本地补打，仅本地保留）
+- 部署 commit：`e2d7b12 fix: worker crashes logging detached BackgroundJob outside session`
+- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 e2d7b12）
+- 本地发布标签：`prod-20260828-<commit>`（在每次部署后由部署者在本地补打，仅本地保留）
 - 复核方式：`git tag --sort=-creatordate` 查最新 prod 标签；服务器 `/opt/fund-dashboard` 内 `git rev-parse HEAD` 应为本次部署 commit。
 
 ## 安全约束
