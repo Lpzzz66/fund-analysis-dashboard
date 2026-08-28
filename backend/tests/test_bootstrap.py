@@ -98,7 +98,7 @@ def _config(storage_root: Path, manifest_path: Path) -> dict[str, object]:
             }
         ],
         "system_settings": {
-            "mail_sync_interval_minutes": 15,
+            "mail_sync_schedule": {"mode": "interval", "interval_minutes": 15},
             "timezone": "Asia/Shanghai",
         },
     }
