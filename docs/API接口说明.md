@@ -202,7 +202,7 @@ FastAPI 默认的参数校验错误为 `422`，响应体含 `detail` 数组。�
 | `company_index` | 分析已就绪时的公司指数，否则为 `null` |
 | `company_daily_return` | 分析已就绪时的公司日收益，否则为 `null` |
 | `risk_event_count` | 状态为 `open` 或 `acknowledged` 的风险事件数 |
-| `quality_status` | 当前实现返回 `valid` 或 `warning` |
+| `quality_status` | 当前实现返回 `valid` 或 `warning`（有任一产品含阻断或警告级发现时为 `warning`，否则为 `valid`） |
 | `funds` | 各产品摘要数组 |
 
 每个 `funds` 项包含：`id`、`name`、`valuation_date`、`unit_nav`、`daily_return`、`analysis_status` 和 `analysis_run_id`。`meta` 还包含 `coverage.available`、`coverage.total`、`analysis_status` 和 `analysis_run_id`。
@@ -337,7 +337,7 @@ quality_status, analysis_status, analysis_run_id
 
 查询参数：`status` 默认为 `pending_review`，可传完整估值版本状态枚举；`page` 默认 1，`page_size` 默认 20，范围 1--100。
 
-每项只返回摘要：`id`（此处即 `version_id`）、`fund_id`、`fund_name`、`valuation_date`、`version_no`、`status`、`critical_count`、`warning_count`。
+每项返回摘要：`id`（此处即 `version_id`）、`fund_id`、`fund_name`、`valuation_date`、`version_no`、`status`、`critical_count`、`warning_count`、`ignored_count`、`source_file_id`、`source_filename`、`source_file_hash`、`source_file_size`、`import_batch_id`，以及与产品质量接口相同结构的 `findings` 数组。
 
 ### `POST /api/v1/reviews/{version_id}/acknowledge`（记录复核决定）
 
@@ -359,7 +359,17 @@ quality_status, analysis_status, analysis_run_id
 
 只有 `publishable` 版本可发布。阻断级校验不能发布；存在警告时必须显式 `confirm_warnings: true`。服务端锁定产品、将同产品同估值日旧已发布版本变为 `superseded`（已替代），再发布当前版本，并创建分析任务。导入批次中的干净版本不需要调用此接口，已由批处理自动发布；本接口主要用于人工确认含警告版本，或其他已进入 `publishable` 状态的版本。
 
-返回：`version_id`、`fund_id`、`valuation_date`、`superseded_version_ids`、`analysis_run_id`。状态冲突和校验不通过返回 `409`。
+返回：`version_id`、`fund_id`、`valuation_date`、`superseded_version_ids`、`analysis_run_id` 和 `validation_ignored_count`（发布时被忽略的阻断级发现数量）。状态冲突和校验不通过返回 `409`。
+
+### `POST /api/v1/reviews/batch-publish`（批量发布 publishable 队列）
+
+只允许 `admin` 和 `operator`。请求体：
+
+```json
+{"reason":"已核对警告"}
+```
+
+`reason` 长度 1--2000。当前 publishable 队列中的所有版本会被并发发布；含阻断级校验的版本会被跳过并计入失败。返回 `requested`、`published`、`failed`（每项含 `version_id` 与失败原因）和 `ignored_findings`。
 
 ### `POST /api/v1/valuations/{version_id}/reject`（驳回）
 
@@ -577,7 +587,13 @@ quality_status, analysis_status, analysis_run_id
 
 ### `POST /api/v1/mail/sync`（立即同步）
 
-管理员或业务员可调用，无请求体。当前请求内执行只读 IMAP（邮件接收协议）同步并返回运行结果，不返回后台任务编号。结果包括 `run_id`、`status`、邮件/附件计数、重复/忽略/失败计数、错误数和错误编号列表。
+管理员或业务员可调用，无请求体。默认在当前请求内执行只读 IMAP（邮件接收协议）同步并返回运行结果，不返回后台任务编号。结果包括 `run_id`、`status`、邮件/附件计数、重复/忽略/失败计数、错误数和错误编号列表。
+
+如果请求头携带 `x-async-sync: 1`，同步会改为后台任务模式：服务端把工作登记到 `mail_sync` 后台任务并立即返回运行编号；客户端可通过 `GET /api/v1/mail/sync-runs` 查看进度与结果，并使用 `POST /api/v1/mail/sync/{run_id}/cancel` 请求取消。仅允许 `admin` 和 `operator` 调用。
+
+### `POST /api/v1/mail/sync/{run_id}/cancel`（取消异步同步运行）
+
+管理员或业务员可调用。当 `x-async-sync: 1` 触发的后台同步仍在 `pending` 或 `running` 状态时，把取消请求标记到对应任务；不存在或不在可取消状态时返回 `404 detail=mail_sync_not_running`。成功返回 `{"data":{"run_id":...,"status":"cancelling"}}`。
 
 ### `GET /api/v1/mail/sync-runs`（同步记录）
 
