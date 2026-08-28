@@ -8,16 +8,17 @@
 
 ## 当前生产版本
 
-- 部署 commit：`f9f0e28 docs: record 2026-08-28 prod hotfix (nav-series window + mem_limit)`
-- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 f9f0e28）
-- 本地发布标签：`prod-20260828-f9f0e28`
+- 部署 commit：`93796c4 fix(api): harden nav-series export default window and reject >5y explicit spans`
+- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 93796c4）
+- 本地发布标签：`prod-20260828-93796c4`
 - 复核方式：`git tag --sort=-creatordate` 查最新 prod 标签；服务器 `/opt/fund-dashboard` 内 `git rev-parse HEAD` 应为本次部署 commit。
 
-> 此次部署包括以下 fix：
+> 此次部署包括以下 fix（按提交链）：
 > 1. **`4a0764c`**：Caddyfile 移除错误的 reverse_proxy 子指令；api 健康检查 start_period 拉到 60s、retries 8、interval 20s，避免冷启被误杀。
 > 2. **`31baf59`**：Caddyfile 给 `/api/*` 加上 transport dial/read/write/response_header_timeout，丢掉 `fail_duration` 避免被动熔断把后续请求挤成 503。
-> 3. **`9b7c5fa`**（本次）：nav-series 默认窗口限制到 365 天（前 1 年），api mem_limit 从 512m 提到 1g，避免 `select ValuationVersion + FundDailySnapshot` 拉取 2000+ 行被 OOM 杀成 exitCode=137 而重启循环。
+> 3. **`9b7c5fa`**：nav-series 默认窗口限制到 365 天（前 1 年），api mem_limit 从 512m 提到 1g，避免 `select ValuationVersion + FundDailySnapshot` 拉取 2000+ 行被 OOM 杀成 exitCode=137 而重启循环。
 > 4. **`a3cd493`**：前端 NavSeries/Positions/Quality tab 切产品时 useEffect 重新拉取，错误细节进 console + Alert，让用户能看到真实 HTTP status 而不是被翻译成统一的「加载失败」。
+> 5. **`93796c4`**（本次）：独立代码审计后修复两处残余 OOM 面——导出端点补默认 365 天窗口；nav_series 显式窗口超 5 年返回 422 拒绝；补 end-only / 5y 上限测试；删除测试死 import；修正本文件部署记录为实际生产 HEAD。
 
 ## 安全约束
 
