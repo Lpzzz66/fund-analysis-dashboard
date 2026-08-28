@@ -13,11 +13,12 @@
 	handle /api/* {
 		reverse_proxy api:8000 {
 			fail_duration 30s
+			timeout 30s
 			transport http {
 				dial_timeout 5s
-				response_timeout 30s
 				read_timeout 30s
 				write_timeout 30s
+				response_header_timeout 10s
 			}
 		}
 	}
@@ -25,9 +26,10 @@
 	handle /health/* {
 		reverse_proxy api:8000 {
 			fail_duration 30s
+			timeout 10s
 			transport http {
 				dial_timeout 5s
-				response_timeout 10s
+				response_header_timeout 5s
 			}
 		}
 	}
