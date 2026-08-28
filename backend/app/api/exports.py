@@ -356,6 +356,12 @@ def export_nav_series(
     ]
     if start is not None:
         filters.append(ValuationVersion.valuation_date >= start)
+    elif end is None:
+        # Cap default lookback to one year so a long-running fund does not
+        # stream an unbounded history; clients can still pass start/end.
+        filters.append(
+            ValuationVersion.valuation_date >= date.today() - timedelta(days=365)
+        )
     if end is not None:
         filters.append(ValuationVersion.valuation_date <= end)
     nav_join = select(FundDailySnapshot).join(

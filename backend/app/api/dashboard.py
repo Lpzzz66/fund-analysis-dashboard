@@ -577,6 +577,13 @@ def nav_series(
 ) -> dict[str, object]:
     if session.get(Fund, fund_id) is None:
         raise HTTPException(status_code=404, detail="Fund not found")
+    # Guard against unbounded explicit windows that could OOM the worker;
+    # the default window is already capped to 365 days below.
+    if start is not None and end is not None and (end - start).days > 365 * 5:
+        raise HTTPException(
+            status_code=422,
+            detail="窗口跨度不能超过 5 年，请缩小范围或使用导出功能",
+        )
     # Cap default lookback so a long-running fund does not OOM the API
     # worker; clients can still pass start/end explicitly.
     statement = (

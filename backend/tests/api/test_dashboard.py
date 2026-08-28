@@ -6,9 +6,7 @@ from decimal import Decimal
 from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
 from app.db.models import (
     AnalysisRun,
-    FundDailySnapshot,
     FundMetricDaily,
-    User,
     ValuationVersion,
 )
 from sqlalchemy import event, select
@@ -368,11 +366,65 @@ def test_nav_series_caps_default_window_to_one_year(
         date.today() - timedelta(days=180)
     ).isoformat()
 
-    # When the client explicitly widens the window the older fund's point
-    # comes back too.
+    # When the client explicitly widens the window (within the 5-year
+    # guard) the older fund's point comes back too.
     response = admin_client.get(
         f"/api/v1/funds/{fund_id_old}/nav-series",
-        params={"start": "2000-01-01", "end": date.today().isoformat()},
+        params={
+            "start": (date.today() - timedelta(days=1000)).isoformat(),
+            "end": date.today().isoformat(),
+        },
     )
     points = response.json()["data"]["points"]
     assert len(points) == 1
+
+
+def test_nav_series_only_end_does_not_apply_default_cap(
+    admin_client, app_and_engine
+) -> None:
+    """Passing only ``end`` (no ``start``) must skip the 365-day default
+    cap and return points older than one year, since the user explicitly
+    asked for history up to ``end``.
+    """
+    engine = app_and_engine[1]
+    fund_id_old, _ = seed_published_fund(
+        engine,
+        name="只传截止产品",
+        valuation_date=date.today() - timedelta(days=900),
+        unit_nav=Decimal("1.10"),
+    )
+    # Only end is passed → the elif (end is None) is skipped, so the
+    # 900-day-old point is returned without a lower-bound cap.
+    response = admin_client.get(
+        f"/api/v1/funds/{fund_id_old}/nav-series",
+        params={"end": date.today().isoformat()},
+    )
+    assert response.status_code == 200
+    points = response.json()["data"]["points"]
+    assert len(points) == 1
+    assert points[0]["valuation_date"] == (
+        date.today() - timedelta(days=900)
+    ).isoformat()
+
+
+def test_nav_series_rejects_window_exceeding_five_years(
+    admin_client, app_and_engine
+) -> None:
+    """An explicit window wider than 5 years must be rejected with 422
+    so a single request cannot OOM the worker.
+    """
+    engine = app_and_engine[1]
+    fund_id, _ = seed_published_fund(
+        engine,
+        name="窗口超限产品",
+        valuation_date=date.today() - timedelta(days=180),
+        unit_nav=Decimal("1.40"),
+    )
+    response = admin_client.get(
+        f"/api/v1/funds/{fund_id}/nav-series",
+        params={
+            "start": (date.today() - timedelta(days=365 * 6)).isoformat(),
+            "end": date.today().isoformat(),
+        },
+    )
+    assert response.status_code == 422

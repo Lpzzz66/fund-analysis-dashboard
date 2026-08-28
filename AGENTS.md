@@ -8,9 +8,9 @@
 
 ## 当前生产版本
 
-- 部署 commit：`9b7c5fa fix(api): cap nav-series default window to 365 days and bump mem_limit to 1GiB`
-- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 9b7c5fa）
-- 本地发布标签：`prod-20260828-9b7c5fa`
+- 部署 commit：`f9f0e28 docs: record 2026-08-28 prod hotfix (nav-series window + mem_limit)`
+- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 f9f0e28）
+- 本地发布标签：`prod-20260828-f9f0e28`
 - 复核方式：`git tag --sort=-creatordate` 查最新 prod 标签；服务器 `/opt/fund-dashboard` 内 `git rev-parse HEAD` 应为本次部署 commit。
 
 > 此次部署包括以下 fix：
