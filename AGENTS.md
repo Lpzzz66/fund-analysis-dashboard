@@ -25,3 +25,30 @@
 - 不在仓库记录私钥内容、密码、令牌或生产授权码。
 - 生产部署前先确认目标主机、SSH 用户和部署目录，再执行数据库迁移、服务重启等有影响操作。
 - 每次成功部署后，按 `prod-YYYYMMDD-<短hash>` 形式在本地打一个 tag（不要 push 到 origin），并在本节同步更新"部署 commit / 部署日期"。
+
+## 生产验证防踩坑
+
+以下两条是部署后在服务器上做端到端验证时容易踩的坑，属于部署架构特性而非代码 BUG：
+
+### 1. API 端口不在宿主机暴露——不要 curl 127.0.0.1:8000
+
+`deploy/compose.prod.yml` 中 api 服务用的是 `expose: "8000"`（仅 Docker 网络内部可见），不是 `ports: ["8000:8000"]`（宿主机映射）。只有 caddy 服务映射了 `80:80` / `443:443`。
+
+因此在服务器宿主机上直接 `curl http://127.0.0.1:8000/api/...` 会得到 exit code 7（连接被拒绝）/ HTTP 000。正确的验证路径有两条：
+
+- **经 Caddy 反向代理**：`curl https://127.0.0.1/api/v1/...` 或 `curl https://danyintouzi.com/api/v1/...`（后者走 Cloudflare，与真实用户路径一致）。
+- **进容器内部**：`docker exec fund-dashboard-api-1 python -c "import urllib.request; ..."` 或 `docker exec fund-dashboard-api-1 curl http://127.0.0.1:8000/...`。
+
+### 2. 鉴权用 Cookie 不是 Bearer Token——登录不返回 token
+
+登录端点 `POST /api/v1/auth/login` 返回的是用户信息 JSON，并通过 `Set-Cookie: fund_session=<token>` 设置会话，**响应体里没有 `token` 字段**。后续受保护端点只认 `fund_session` Cookie，不认 `Authorization: Bearer` 头。
+
+因此验证受保护接口时必须用 cookie jar 保持会话：
+
+```bash
+curl -c /tmp/cookies.txt -X POST https://danyintouzi.com/api/v1/auth/login \
+  -H "Content-Type: application/json" -d '{"username":"...","password":"..."}'
+curl -b /tmp/cookies.txt https://danyintouzi.com/api/v1/funds/1/nav-series
+```
+
+直接从登录响应里取 `data.token` 会得到 `KeyError`，用 `Authorization: Bearer` 访问受保护端点会得到 401 `Not authenticated`。
