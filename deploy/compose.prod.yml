@@ -80,7 +80,7 @@ services:
       timeout: 10s
       retries: 8
       start_period: 60s
-    mem_limit: 512m
+    mem_limit: 1024m
     logging: *default-logging
 
   worker:

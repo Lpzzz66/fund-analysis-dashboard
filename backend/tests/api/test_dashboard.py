@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
 from app.db.models import (
     AnalysisRun,
+    FundDailySnapshot,
     FundMetricDaily,
+    User,
     ValuationVersion,
 )
 from sqlalchemy import event, select
@@ -325,3 +327,52 @@ def test_login_navigation_and_user_list_are_role_scoped(admin_client) -> None:
     assert listed.status_code == 200
     assert listed.json()["meta"]["total"] == 1
     assert listed.json()["data"][0]["username"] == "operator"
+
+
+def test_nav_series_caps_default_window_to_one_year(
+    admin_client, app_and_engine
+) -> None:
+    """nav-series must default to a 365-day window so long-running funds
+    do not OOM the API worker on each render.
+    """
+    engine = app_and_engine[1]
+    # Seed two funds because within a single fund each ValuationVersion is
+    # published at most once via PublishingService.
+    fund_id, _ = seed_published_fund(
+        engine,
+        name="长期产品近",
+        valuation_date=date.today() - timedelta(days=180),
+        unit_nav=Decimal("1.30"),
+    )
+    fund_id_old, _ = seed_published_fund(
+        engine,
+        name="长期产品远",
+        valuation_date=date.today() - timedelta(days=900),
+        unit_nav=Decimal("1.05"),
+    )
+
+    # The default window is 365 days; the older fund's published
+    # valuation should be excluded.
+    response = admin_client.get(
+        f"/api/v1/funds/{fund_id_old}/nav-series"
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["points"] == []
+
+    # The newer fund should be in range and surface its NAV point.
+    response = admin_client.get(f"/api/v1/funds/{fund_id}/nav-series")
+    assert response.status_code == 200
+    points = response.json()["data"]["points"]
+    assert len(points) == 1
+    assert points[0]["valuation_date"] == (
+        date.today() - timedelta(days=180)
+    ).isoformat()
+
+    # When the client explicitly widens the window the older fund's point
+    # comes back too.
+    response = admin_client.get(
+        f"/api/v1/funds/{fund_id_old}/nav-series",
+        params={"start": "2000-01-01", "end": date.today().isoformat()},
+    )
+    points = response.json()["data"]["points"]
+    assert len(points) == 1

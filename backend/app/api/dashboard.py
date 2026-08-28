@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -577,6 +577,8 @@ def nav_series(
 ) -> dict[str, object]:
     if session.get(Fund, fund_id) is None:
         raise HTTPException(status_code=404, detail="Fund not found")
+    # Cap default lookback so a long-running fund does not OOM the API
+    # worker; clients can still pass start/end explicitly.
     statement = (
         select(ValuationVersion, FundDailySnapshot)
         .join(
@@ -591,6 +593,10 @@ def nav_series(
     )
     if start is not None:
         statement = statement.where(ValuationVersion.valuation_date >= start)
+    elif end is None:
+        statement = statement.where(
+            ValuationVersion.valuation_date >= date.today() - timedelta(days=365)
+        )
     if end is not None:
         statement = statement.where(ValuationVersion.valuation_date <= end)
     rows = list(session.execute(statement))
