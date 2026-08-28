@@ -14,7 +14,7 @@ from app.analytics.service import AnalysisProcessResult, process_analysis_run
 from app.config import Settings
 from app.db.base import AnalysisRunStatus, AuditResult, ImportBatchStatus, JobStatus
 from app.db.models import AnalysisRun, AuditLog, BackgroundJob, ImportBatch
-from app.mail import MailService, MailSettings
+from app.mail import MailService, MailSettings, MailSyncResult
 from app.system.settings import effective_mail_username
 
 from .processor import BatchProcessResult, process_import_batch
@@ -205,7 +205,13 @@ def fail_job(
 
 def process_next_job(
     session: Session, settings: Settings
-) -> tuple[BackgroundJob, BatchProcessResult | AnalysisProcessResult | None] | None:
+) -> (
+    tuple[
+        BackgroundJob,
+        BatchProcessResult | AnalysisProcessResult | MailSyncResult | None,
+    ]
+    | None
+):
     """Claim and execute one database-backed job."""
 
     job = claim_next_job(session)
