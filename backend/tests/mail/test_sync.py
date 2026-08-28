@@ -4,6 +4,10 @@ import os
 import stat
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.db.models import (
     AuditLog,
     ImportBatch,
@@ -11,9 +15,6 @@ from app.db.models import (
     SourceMessage,
     SystemState,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 from .conftest import FakeMailbox, make_email, make_xlsx_bytes
 
@@ -307,8 +308,12 @@ def test_known_mailbox_skips_full_message_fetches(
 
     fake_mailbox.messages.update(
         {
-            "1": make_email("<message-1@example.test>", [("one.xlsx", make_xlsx_bytes())]),
-            "2": make_email("<message-2@example.test>", [("two.xlsx", make_xlsx_bytes())]),
+            "1": make_email(
+                "<message-1@example.test>", [("one.xlsx", make_xlsx_bytes())]
+            ),
+            "2": make_email(
+                "<message-2@example.test>", [("two.xlsx", make_xlsx_bytes())]
+            ),
         }
     )
 
@@ -449,8 +454,8 @@ def test_sync_with_none_actor_user_id_succeeds(
     user initiated them. The sync must not crash with a foreign-key violation
     on audit_log.actor_user_id (which used to happen when 0 was passed)."""
 
-    from app.db.models import BackgroundJob
     from app.db.base import JobStatus
+    from app.db.models import BackgroundJob
     from app.mail.config import MailSettings
     from app.mail.service import MailService
     from app.system.settings import effective_mail_username

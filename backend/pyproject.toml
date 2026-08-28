@@ -38,3 +38,9 @@ markers = [
 where = ["."]
 include = ["app*", "tools*"]
 exclude = ["tools.valuation_inventory.tests*"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use date.today() so they mirror the production
+# route's "today" anchor (e.g. dashboard.py / exports.py). Suppress
+# the naive-datetime warning for that directory only.
+"tests/**" = ["DTZ011"]

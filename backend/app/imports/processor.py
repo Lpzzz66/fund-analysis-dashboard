@@ -188,7 +188,9 @@ def process_import_batch(
     publisher = PublishingService(session)
     for fund_versions in auto_published_by_fund.values():
         dates = [version.valuation_date for version in fund_versions]
-        latest = max(fund_versions, key=lambda version: (version.valuation_date, version.id))
+        latest = max(
+            fund_versions, key=lambda version: (version.valuation_date, version.id)
+        )
         analysis_run = publisher.queue_analysis_run(
             latest.id,
             start_date=min(dates),

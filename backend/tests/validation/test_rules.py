@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.db.base import ValidationLevel, ValuationStatus
 from app.parser.interface import ParsedPosition, ParsedShareClass, ParsedValuation
 from app.validation.rules import (
@@ -14,7 +16,6 @@ from app.validation.rules import (
     validate_parsed_valuation,
     validate_values,
 )
-from sqlalchemy.orm import Session
 
 
 def test_asset_liability_balance_reports_info_and_critical() -> None:

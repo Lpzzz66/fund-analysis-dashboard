@@ -68,9 +68,7 @@ def test_manual_publish_ignores_validation_findings(
     assert published.status_code == 200
     assert published.json()["data"]["validation_ignored_count"] == 1
 
-    review_rows = admin_client.get(
-        "/api/v1/reviews", params={"status": "published"}
-    )
+    review_rows = admin_client.get("/api/v1/reviews", params={"status": "published"})
     assert review_rows.status_code == 200
     row = review_rows.json()["data"][0]
     assert row["ignored_count"] == 1

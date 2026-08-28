@@ -2,6 +2,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.analytics.service import _lock_fund_for_analysis
 from app.db.base import AnalysisRunStatus, JobStatus, RiskSeverity, ValuationStatus
 from app.db.models import (
@@ -18,8 +21,6 @@ from app.db.models import (
 )
 from app.imports.tasks import claim_next_job, process_next_job
 from app.publishing import PublishingService
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 def test_postgresql_analysis_locks_fund_before_event_reconciliation() -> None:

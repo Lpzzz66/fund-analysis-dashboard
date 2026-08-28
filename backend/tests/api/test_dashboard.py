@@ -3,14 +3,15 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session
+
 from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
 from app.db.models import (
     AnalysisRun,
     FundMetricDaily,
     ValuationVersion,
 )
-from sqlalchemy import event, select
-from sqlalchemy.orm import Session
 
 from .conftest import seed_published_fund
 
@@ -351,9 +352,7 @@ def test_nav_series_caps_default_window_to_one_year(
 
     # The default window is 365 days; the older fund's published
     # valuation should be excluded.
-    response = admin_client.get(
-        f"/api/v1/funds/{fund_id_old}/nav-series"
-    )
+    response = admin_client.get(f"/api/v1/funds/{fund_id_old}/nav-series")
     assert response.status_code == 200
     assert response.json()["data"]["points"] == []
 
@@ -362,9 +361,9 @@ def test_nav_series_caps_default_window_to_one_year(
     assert response.status_code == 200
     points = response.json()["data"]["points"]
     assert len(points) == 1
-    assert points[0]["valuation_date"] == (
-        date.today() - timedelta(days=180)
-    ).isoformat()
+    assert (
+        points[0]["valuation_date"] == (date.today() - timedelta(days=180)).isoformat()
+    )
 
     # When the client explicitly widens the window (within the 5-year
     # guard) the older fund's point comes back too.
@@ -402,9 +401,9 @@ def test_nav_series_only_end_does_not_apply_default_cap(
     assert response.status_code == 200
     points = response.json()["data"]["points"]
     assert len(points) == 1
-    assert points[0]["valuation_date"] == (
-        date.today() - timedelta(days=900)
-    ).isoformat()
+    assert (
+        points[0]["valuation_date"] == (date.today() - timedelta(days=900)).isoformat()
+    )
 
 
 def test_nav_series_rejects_window_exceeding_five_years(

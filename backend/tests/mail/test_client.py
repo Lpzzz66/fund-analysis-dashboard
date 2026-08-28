@@ -63,8 +63,7 @@ def test_fetch_headers_bulk_splits_into_chunks() -> None:
     """More than chunk_size UIDs must produce multiple ranged requests."""
 
     messages = {
-        str(uid): make_email(f"<m{uid}@example.test>", [])
-        for uid in range(1, 1002)
+        str(uid): make_email(f"<m{uid}@example.test>", []) for uid in range(1, 1002)
     }
     client, fake = _fake_connection(messages)
     connection = _open(client)
@@ -83,22 +82,15 @@ def test_fetch_headers_bulk_raises_on_chunk_failure() -> None:
     caller can record it in counters instead of silently degrading."""
 
     messages = {
-        str(uid): make_email(f"<m{uid}@example.test>", [])
-        for uid in range(1, 3)
+        str(uid): make_email(f"<m{uid}@example.test>", []) for uid in range(1, 3)
     }
     client, fake = _fake_connection(messages)
     connection = _open(client)
 
     original_uid = fake.uid
 
-    def selective_uid(
-        command: str, *args: object
-    ) -> tuple[str, list[object]]:
-        if (
-            command.upper() == "FETCH"
-            and isinstance(args[0], str)
-            and ":" in args[0]
-        ):
+    def selective_uid(command: str, *args: object) -> tuple[str, list[object]]:
+        if command.upper() == "FETCH" and isinstance(args[0], str) and ":" in args[0]:
             raise MailMessageError("imap_fetch_failed")
         return original_uid(command, *args)
 

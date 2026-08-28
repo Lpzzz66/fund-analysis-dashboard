@@ -278,9 +278,7 @@ class BackupService:
             retention_days=retention_days,
         )
 
-    def cleanup_old_backups(
-        self, *, now: datetime | None = None
-    ) -> dict[str, object]:
+    def cleanup_old_backups(self, *, now: datetime | None = None) -> dict[str, object]:
         """Delete backup files older than ``retention_days``.
 
         Only files matching ``database-*.dump`` in the backup root are

@@ -1,8 +1,8 @@
 """Record validation findings intentionally ignored during publication."""
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 revision = "0007_validation_ignore"
 down_revision = "0006_position_source"
@@ -12,7 +12,9 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    columns = {column["name"] for column in sa.inspect(bind).get_columns("validation_result")}
+    columns = {
+        column["name"] for column in sa.inspect(bind).get_columns("validation_result")
+    }
     additions = (
         sa.Column("ignored", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("ignored_at", sa.DateTime(timezone=True), nullable=True),
@@ -54,7 +56,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    columns = {column["name"] for column in sa.inspect(bind).get_columns("validation_result")}
+    columns = {
+        column["name"] for column in sa.inspect(bind).get_columns("validation_result")
+    }
     if "ignored_by_user_id" in columns:
         if bind.dialect.name == "sqlite":
             with op.batch_alter_table("validation_result") as batch:

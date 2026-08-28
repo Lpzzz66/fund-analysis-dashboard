@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.config import get_settings
 from app.db.base import AuditResult, Base, JobStatus
 from app.db.models import AuditLog, BackgroundJob, SystemState
@@ -14,7 +16,6 @@ from app.system.maintenance import (
     ScheduleConfig,
     summarize_jobs,
 )
-from sqlalchemy.orm import Session
 
 
 def _session() -> tuple[object, Session]:

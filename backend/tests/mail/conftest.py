@@ -7,13 +7,14 @@ from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.auth.dependencies import get_db
 from app.db.base import Base
 from app.db.session import create_engine
 from app.main import create_app
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 def make_xlsx_bytes(payload: bytes = b"worksheet") -> bytes:
@@ -50,8 +51,8 @@ def make_email(
 def _message_id_header(raw_message: bytes) -> bytes:
     """Extract the raw Message-ID header block the way a server would return it."""
 
-    from email.parser import BytesParser
     from email import policy
+    from email.parser import BytesParser
 
     parsed = BytesParser(policy=policy.default).parsebytes(raw_message)
     message_id = parsed.get("Message-ID")

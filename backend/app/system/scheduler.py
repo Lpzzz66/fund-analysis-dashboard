@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, time
-from typing import Any
+from datetime import UTC, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -17,7 +16,6 @@ from app.config import Settings
 from app.db.base import AuditResult, JobStatus
 from app.db.models import AuditLog, BackgroundJob, SystemState
 from app.system.settings import (
-    DEFAULT_MAIL_SYNC_SCHEDULE,
     effective_mail_sync_schedule,
     mail_sync_enabled,
 )
@@ -39,7 +37,9 @@ class MailSyncScheduler:
     async def run(self) -> None:
         """Main loop — runs until the asyncio task is cancelled."""
 
-        logger.info("mail sync scheduler started (poll every %ds)", POLL_INTERVAL_SECONDS)
+        logger.info(
+            "mail sync scheduler started (poll every %ds)", POLL_INTERVAL_SECONDS
+        )
         while True:
             try:
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
@@ -63,12 +63,17 @@ class MailSyncScheduler:
                 session.commit()
 
     def _has_running_sync(self, session: Session) -> bool:
-        return session.scalar(
-            select(BackgroundJob.id).where(
-                BackgroundJob.job_type == "mail_sync",
-                BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
-            ).limit(1)
-        ) is not None
+        return (
+            session.scalar(
+                select(BackgroundJob.id)
+                .where(
+                    BackgroundJob.job_type == "mail_sync",
+                    BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+                )
+                .limit(1)
+            )
+            is not None
+        )
 
     def _is_due(
         self, schedule: dict[str, object], now_utc: datetime, session: Session
@@ -119,9 +124,8 @@ class MailSyncScheduler:
             if t != current_hm:
                 continue
             days = entry.get("days", [])
-            if isinstance(days, list) and days:
-                if weekday not in days:
-                    continue
+            if isinstance(days, list) and days and weekday not in days:
+                continue
             slot_key = f"{current_hm}:{','.join(str(d) for d in (days or []))}"
             if slot_key in self._scheduled_triggered_today:
                 continue

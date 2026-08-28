@@ -62,7 +62,12 @@ describe("apiRequest", () => {
 
     const result = await apiRequest<Blob>("/imports/1/source/2");
 
-    expect(result).toBeInstanceOf(Blob);
+    // Duck-type rather than instanceof: vitest's jsdom Blob and the
+    // undici Blob returned by response.blob() in Node are distinct
+    // realms, so a literal instanceof check would fail in CI.
+    expect(result).toBeTruthy();
+    expect(typeof result.text).toBe("function");
+    expect(result.size).toBe(11);
     await expect(result.text()).resolves.toBe("excel-bytes");
   });
 

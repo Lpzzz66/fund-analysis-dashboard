@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0009_cleanup_settings_schedule"

@@ -209,7 +209,9 @@ def effective_mail_sync_schedule(session: Session) -> dict[str, object]:
     """Return the validated mail sync schedule, with backward compatibility."""
 
     state = session.get(SystemState, 1)
-    persisted = state.settings if state is not None and isinstance(state.settings, dict) else {}
+    persisted = (
+        state.settings if state is not None and isinstance(state.settings, dict) else {}
+    )
     raw = persisted.get("mail_sync_schedule")
     if isinstance(raw, dict):
         try:

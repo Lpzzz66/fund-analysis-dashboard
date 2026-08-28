@@ -1,6 +1,7 @@
 """Add the worker lease token used for import job ownership."""
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0003_import_job_lease"

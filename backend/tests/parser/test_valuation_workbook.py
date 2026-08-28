@@ -1,7 +1,8 @@
 from pathlib import Path
 
-from app.parser import ValuationParser
 from openpyxl import Workbook
+
+from app.parser import ValuationParser
 
 
 def _write_workbook(path: Path) -> None:

@@ -1,6 +1,7 @@
 """Link analysis runs to the valuation publication that triggered them."""
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0005_analysis_trigger_version"

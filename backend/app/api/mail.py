@@ -259,7 +259,9 @@ def sync(
         session.commit()
     except MailSyncAlreadyRunning as exc:
         session.rollback()
-        raise HTTPException(status_code=409, detail=f"mail_sync_already_running:{exc}") from None
+        raise HTTPException(
+            status_code=409, detail=f"mail_sync_already_running:{exc}"
+        ) from None
     except MailConfigurationError:
         session.rollback()
         raise HTTPException(status_code=503, detail="Mail is not configured") from None

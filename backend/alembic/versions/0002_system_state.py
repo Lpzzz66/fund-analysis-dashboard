@@ -1,6 +1,7 @@
 """Add the singleton state used to serialize one-time initialization."""
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0002_system_state"

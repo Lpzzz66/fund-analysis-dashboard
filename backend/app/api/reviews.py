@@ -102,7 +102,9 @@ def list_reviews(
             current["critical"] += 1
         elif finding.level == ValidationLevel.WARNING:
             current["warning"] += 1
-    source_ids = [version.source_file_id for version, _ in rows if version.source_file_id]
+    source_ids = [
+        version.source_file_id for version, _ in rows if version.source_file_id
+    ]
     sources = (
         {
             source.id: source

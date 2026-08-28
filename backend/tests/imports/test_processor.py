@@ -4,6 +4,10 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
+from openpyxl import Workbook
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session
+
 from app.auth.service import AuthService
 from app.db.base import SourceType, ValuationStatus
 from app.db.models import (
@@ -27,9 +31,6 @@ from app.imports.processor import (
 )
 from app.imports.service import ImportService
 from app.imports.tasks import process_next_job
-from openpyxl import Workbook
-from sqlalchemy import event, select
-from sqlalchemy.orm import Session
 
 
 def _valuation_xlsx(
@@ -294,8 +295,7 @@ def test_processor_coalesces_clean_publications_by_fund(
         )
         assert len(publication_audits) == 2
         assert all(
-            audit.summary["analysis_scheduled"] is False
-            for audit in publication_audits
+            audit.summary["analysis_scheduled"] is False for audit in publication_audits
         )
 
 

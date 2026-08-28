@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -602,7 +602,8 @@ def nav_series(
         statement = statement.where(ValuationVersion.valuation_date >= start)
     elif end is None:
         statement = statement.where(
-            ValuationVersion.valuation_date >= date.today() - timedelta(days=365)
+            ValuationVersion.valuation_date
+            >= datetime.now(UTC).date() - timedelta(days=365)
         )
     if end is not None:
         statement = statement.where(ValuationVersion.valuation_date <= end)

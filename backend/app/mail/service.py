@@ -138,15 +138,22 @@ class MailService:
     def enqueue_sync(self, actor_user_id: int | None) -> MailSyncResult:
         self.settings.require_configured()
         active = self.session.scalar(
-            select(BackgroundJob).where(
+            select(BackgroundJob)
+            .where(
                 BackgroundJob.job_type == "mail_sync",
-                BackgroundJob.status.in_((JobStatus.PENDING, JobStatus.RUNNING, JobStatus.RETRY_DUE)),
-            ).order_by(BackgroundJob.id.desc()).limit(1)
+                BackgroundJob.status.in_(
+                    (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.RETRY_DUE)
+                ),
+            )
+            .order_by(BackgroundJob.id.desc())
+            .limit(1)
         )
         if active is not None:
             raise MailSyncAlreadyRunning(active.resource_id)
         run_id, _job = self._start_run(actor_user_id, queued=True)
-        return MailSyncResult(run_id=run_id, status="queued", summary=_SyncCounters().as_dict())
+        return MailSyncResult(
+            run_id=run_id, status="queued", summary=_SyncCounters().as_dict()
+        )
 
     def sync(
         self,
@@ -168,9 +175,7 @@ class MailService:
                 # Pre-screen every message with bulk header fetches and one
                 # batched database lookup, so a fully-known mailbox costs a
                 # handful of round trips instead of one per message.
-                external_ids = self._precompute_external_ids(
-                    connection, uids, counters
-                )
+                external_ids = self._precompute_external_ids(connection, uids, counters)
                 known_ids = self._known_external_ids(
                     {eid for eid in external_ids.values()}
                 )
@@ -216,7 +221,13 @@ class MailService:
             counters.failed_messages += 1
             counters.errors.append("sync_failed")
 
-        status = "cancelled" if self._cancel_requested(job.id) else "failed" if counters.errors else "succeeded"
+        status = (
+            "cancelled"
+            if self._cancel_requested(job.id)
+            else "failed"
+            if counters.errors
+            else "succeeded"
+        )
         summary = counters.as_dict()
         self._finish_run(job, status, summary)
         return MailSyncResult(run_id=run_id, status=status, summary=summary)
@@ -236,7 +247,9 @@ class MailService:
             select(AuditLog)
             .where(
                 AuditLog.resource_type == "mail_sync",
-                AuditLog.action.in_(("mail.sync_completed", "mail.sync_failed", "mail.sync_cancelled")),
+                AuditLog.action.in_(
+                    ("mail.sync_completed", "mail.sync_failed", "mail.sync_cancelled")
+                ),
             )
             .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .limit(min(max(limit, 1), 100))
@@ -253,7 +266,11 @@ class MailService:
         completed = [
             {
                 "run_id": audit.resource_id,
-                "status": "failed" if audit.action == "mail.sync_failed" else "cancelled" if audit.action == "mail.sync_cancelled" else "succeeded",
+                "status": "failed"
+                if audit.action == "mail.sync_failed"
+                else "cancelled"
+                if audit.action == "mail.sync_cancelled"
+                else "succeeded",
                 "created_at": audit.created_at,
                 **MailService._public_summary(audit.summary),
             }
@@ -261,7 +278,9 @@ class MailService:
         ]
         return (active + completed)[:limit]
 
-    def _start_run(self, actor_user_id: int | None, *, queued: bool = False) -> tuple[str, BackgroundJob]:
+    def _start_run(
+        self, actor_user_id: int | None, *, queued: bool = False
+    ) -> tuple[str, BackgroundJob]:
         run_id = uuid4().hex
         now = datetime.now(UTC)
         job = BackgroundJob(
@@ -286,14 +305,24 @@ class MailService:
     def _finish_run(
         self, job: BackgroundJob, status: str, summary: dict[str, object]
     ) -> None:
-        job.status = JobStatus.SUCCEEDED if status in {"succeeded", "cancelled"} else JobStatus.FAILED
+        job.status = (
+            JobStatus.SUCCEEDED
+            if status in {"succeeded", "cancelled"}
+            else JobStatus.FAILED
+        )
         job.finished_at = datetime.now(UTC)
         job.locked_at = None
         job.lease_token = None
         job.next_retry_at = None
-        job.error_code = None if status in {"succeeded", "cancelled"} else "mail_sync_failed"
+        job.error_code = (
+            None if status in {"succeeded", "cancelled"} else "mail_sync_failed"
+        )
         self._record_audit(
-            action="mail.sync_completed" if status == "succeeded" else "mail.sync_cancelled" if status == "cancelled" else "mail.sync_failed",
+            action="mail.sync_completed"
+            if status == "succeeded"
+            else "mail.sync_cancelled"
+            if status == "cancelled"
+            else "mail.sync_failed",
             resource_type="mail_sync",
             resource_id=job.resource_id,
             actor_user_id=None,
@@ -339,9 +368,7 @@ class MailService:
                 # UID missing from the bulk response; per-UID fetch in
                 # _process_uid keeps the message correct.
                 continue
-            external_ids[uid] = self._extract_message_id_from_headers(
-                raw_headers, uid
-            )
+            external_ids[uid] = self._extract_message_id_from_headers(raw_headers, uid)
         return external_ids
 
     def _known_external_ids(self, candidates: set[str]) -> set[str]:

@@ -1,8 +1,8 @@
 """Application factory and public process health endpoint."""
 
 import asyncio
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 

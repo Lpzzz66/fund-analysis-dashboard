@@ -360,7 +360,8 @@ def export_nav_series(
         # Cap default lookback to one year so a long-running fund does not
         # stream an unbounded history; clients can still pass start/end.
         filters.append(
-            ValuationVersion.valuation_date >= date.today() - timedelta(days=365)
+            ValuationVersion.valuation_date
+            >= datetime.now(UTC).date() - timedelta(days=365)
         )
     if end is not None:
         filters.append(ValuationVersion.valuation_date <= end)

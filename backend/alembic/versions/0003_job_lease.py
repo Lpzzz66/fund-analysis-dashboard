@@ -1,6 +1,7 @@
 """Index the columns used to claim import jobs efficiently."""
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0003_job_lease"
