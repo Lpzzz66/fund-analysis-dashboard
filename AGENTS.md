@@ -8,13 +8,16 @@
 
 ## 当前生产版本
 
-- 部署 commit：`4a0764c fix(caddy): remove unsupported reverse_proxy timeout directive`
-- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 4a0764c）
-- 本地发布标签：`prod-20260828-4a0764c`
+- 部署 commit：`9b7c5fa fix(api): cap nav-series default window to 365 days and bump mem_limit to 1GiB`
+- 部署日期：2026-08-28（服务器 `/opt/fund-dashboard` `git rev-parse HEAD` 已核实为 9b7c5fa）
+- 本地发布标签：`prod-20260828-9b7c5fa`
 - 复核方式：`git tag --sort=-creatordate` 查最新 prod 标签；服务器 `/opt/fund-dashboard` 内 `git rev-parse HEAD` 应为本次部署 commit。
 
-> 此次部署与 `e5b313c` / `4bcf093` 一起修复了产品列表与净值序列反复返回 502 的问题：
-> api 容器冷启时 /health/live 慢于原 `start_period: 15s` 窗口，被 docker 判 unhealthy 后整容器重启，导致 Caddy → api 出现 connect refused / connection reset；现将 start_period 拉到 60s、retries 8、interval 20s，并把 Caddyfile 的 `/api/*` reverse_proxy 加上 `fail_duration 30s` 与 transport 层 dial / read / write 超时，避免重启窗口返回 502。
+> 此次部署包括以下 fix：
+> 1. **`4a0764c`**：Caddyfile 移除错误的 reverse_proxy 子指令；api 健康检查 start_period 拉到 60s、retries 8、interval 20s，避免冷启被误杀。
+> 2. **`31baf59`**：Caddyfile 给 `/api/*` 加上 transport dial/read/write/response_header_timeout，丢掉 `fail_duration` 避免被动熔断把后续请求挤成 503。
+> 3. **`9b7c5fa`**（本次）：nav-series 默认窗口限制到 365 天（前 1 年），api mem_limit 从 512m 提到 1g，避免 `select ValuationVersion + FundDailySnapshot` 拉取 2000+ 行被 OOM 杀成 exitCode=137 而重启循环。
+> 4. **`a3cd493`**：前端 NavSeries/Positions/Quality tab 切产品时 useEffect 重新拉取，错误细节进 console + Alert，让用户能看到真实 HTTP status 而不是被翻译成统一的「加载失败」。
 
 ## 安全约束
 
