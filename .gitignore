@@ -35,6 +35,9 @@ tmp-audit-*.db
 tmp-audit-migration/
 tmp-batch-*.db
 
+# Agent review/audit docs are process artifacts, not part of the repo
+docs/reviews/
+
 # Ad-hoc scratch scripts and their outputs (unrelated to the dashboard repo)
 ag_filter.py
 inspect_ag.py
