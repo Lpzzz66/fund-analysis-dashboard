@@ -46,7 +46,7 @@ export default function Initialize() {
   }
 
   return (
-    <div className="fd-login">
+    <div className="fd-login fd-login--setup">
       <div className="fd-login__card">
         <div className="fd-login__brand">First-time Setup</div>
         <h1 className="fd-login__title">系统初始化</h1>

@@ -1,184 +1,126 @@
-import { useEffect, useMemo, useState } from "react";
-import { Layout, Menu, Avatar, Dropdown, Typography } from "antd";
+import { useMemo, useState } from "react";
+import { Avatar, Dropdown } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ROLE_LABEL } from "@/utils/constants";
 import { navForRole } from "@/utils/permissions";
 import { useAuth } from "@/app/auth";
-
-const { Sider, Header, Content } = Layout;
 
 interface NavItem {
   key: string;
   label: string;
   path: string;
   group: string;
+  icon: string;
 }
 
 const ALL_NAV: NavItem[] = [
-  { key: "dashboard", label: "公司总览", path: "/dashboard", group: "总览" },
-  { key: "risk", label: "风险概览", path: "/risk", group: "总览" },
-  { key: "funds", label: "产品列表", path: "/funds", group: "产品分析" },
-  { key: "imports", label: "导入中心", path: "/imports", group: "数据运营" },
-  { key: "reviews", label: "异常复核", path: "/reviews", group: "数据运营" },
-  { key: "mail", label: "邮件接入", path: "/mail", group: "数据运营" },
-  { key: "adminFunds", label: "产品管理", path: "/admin/funds", group: "基础配置" },
-  { key: "adminSubjects", label: "科目与模板", path: "/admin/subjects", group: "基础配置" },
-  { key: "adminRiskRules", label: "风险规则", path: "/admin/risk-rules", group: "基础配置" },
-  { key: "adminUsers", label: "账号管理", path: "/admin/users", group: "系统管理" },
-  { key: "adminAudit", label: "审计日志", path: "/admin/audit", group: "系统管理" },
-  { key: "adminSettings", label: "系统设置", path: "/admin/settings", group: "系统管理" },
-  { key: "adminRetention", label: "数据保留与备份", path: "/admin/retention", group: "系统管理" },
+  { key: "dashboard", label: "公司总览", path: "/dashboard", group: "总览", icon: "◐" },
+  { key: "risk", label: "风险概览", path: "/risk", group: "总览", icon: "!" },
+  { key: "funds", label: "产品列表", path: "/funds", group: "产品分析", icon: "▦" },
+  { key: "imports", label: "导入中心", path: "/imports", group: "数据运营", icon: "↑" },
+  { key: "reviews", label: "异常复核", path: "/reviews", group: "数据运营", icon: "✓" },
+  { key: "mail", label: "邮件接入", path: "/mail", group: "数据运营", icon: "@" },
+  { key: "adminFunds", label: "产品管理", path: "/admin/funds", group: "基础配置", icon: "▥" },
+  { key: "adminSubjects", label: "科目与模板", path: "/admin/subjects", group: "基础配置", icon: "≡" },
+  { key: "adminRiskRules", label: "风险规则", path: "/admin/risk-rules", group: "基础配置", icon: "◇" },
+  { key: "adminUsers", label: "账号管理", path: "/admin/users", group: "系统管理", icon: "◉" },
+  { key: "adminAudit", label: "审计日志", path: "/admin/audit", group: "系统管理", icon: "↗" },
+  { key: "adminSettings", label: "系统设置", path: "/admin/settings", group: "系统管理", icon: "⚙" },
+  { key: "adminRetention", label: "数据保留与备份", path: "/admin/retention", group: "系统管理", icon: "◷" },
 ];
+
+const GROUP_EN: Record<string, string> = {
+  "总览": "Overview",
+  "产品分析": "Funds",
+  "数据运营": "Operations",
+  "基础配置": "Catalog",
+  "系统管理": "System",
+};
+
+function Brand() {
+  return (
+    <div className="fd-brand">
+      <div className="fd-brand-mark" aria-hidden="true"><i /><i /><i /><i /></div>
+      <div>
+        <strong>基金运营看板</strong>
+        <span>Fund Operations</span>
+      </div>
+    </div>
+  );
+}
 
 export function AppLayout() {
   const { session, logout } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const loc = useLocation();
-
-  const allowed = useMemo(
-    () => new Set(navForRole(session?.role ?? "viewer")),
-    [session?.role],
-  );
-
-  const items = useMemo(() => {
-    const visible = ALL_NAV.filter((n) => allowed.has(n.key));
-    const groups = Array.from(new Set(visible.map((v) => v.group)));
-    return groups.map((g) => ({
-      key: g,
-      label: g,
-      children: visible
-        .filter((v) => v.group === g)
-        .map((v) => ({ key: v.path, label: v.label })),
-    }));
-  }, [allowed]);
-
-  const selected = useMemo(() => {
-    const match = ALL_NAV.find((n) => loc.pathname.startsWith(n.path));
-    return match ? [match.path] : [loc.pathname];
-  }, [loc.pathname]);
-
-  const initialOpenKeys = useMemo(
-    () => Array.from(new Set(ALL_NAV.filter((n) => allowed.has(n.key)).map((n) => n.group))),
-    [allowed],
-  );
-  const [openKeys, setOpenKeys] = useState<string[]>(initialOpenKeys);
-  // Reset expanded groups whenever the role changes so a fresh login (or a
-  // logout/login as a different role) doesn't keep stale groups open.
-  useEffect(() => {
-    setOpenKeys(initialOpenKeys);
-  }, [initialOpenKeys]);
-
+  const allowed = useMemo(() => new Set(navForRole(session?.role ?? "viewer")), [session?.role]);
+  const visibleNav = useMemo(() => ALL_NAV.filter((item) => allowed.has(item.key)), [allowed]);
+  const groups = useMemo(() => Array.from(new Set(visibleNav.map((item) => item.group))), [visibleNav]);
+  const selected = ALL_NAV.find((item) => loc.pathname.startsWith(item.path));
   const userMenu = {
-    items: [
-      { key: "logout", label: "退出登录", danger: true },
-    ],
+    items: [{ key: "logout", label: "退出登录", danger: true }],
     onClick: async ({ key }: { key: string }) => {
-      if (key === "logout") {
-        try {
-          await logout();
-        } catch {
-          // The provider has already cleared the local session.
-        } finally {
-          navigate("/login", { replace: true });
-        }
-      }
+      if (key !== "logout") return;
+      try { await logout(); } finally { navigate("/login", { replace: true }); }
     },
   };
 
+  function go(path: string) {
+    navigate(path);
+    setMobileOpen(false);
+  }
+
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      <Sider
-        className="fd-sider"
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        width={212}
-        breakpoint="lg"
-        style={{ position: "sticky", top: 0, height: "100vh", overflow: "auto" }}
-      >
-        <div
-          style={{
-            height: 56,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0 18px",
-            color: "#fff",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              background: "var(--accent)",
-              display: "grid",
-              placeItems: "center",
-              fontFamily: "var(--mono)",
-              fontWeight: 700,
-              fontSize: 14,
-              flexShrink: 0,
-            }}
-          >
-            FD
+    <div className="fd-shell">
+      <div className={`fd-mobile-backdrop ${mobileOpen ? "is-visible" : ""}`} onClick={() => setMobileOpen(false)} />
+      <aside className={`fd-sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="主导航">
+        <Brand />
+        <nav className="fd-nav">
+          {groups.map((group) => (
+            <section className="fd-nav-group" key={group}>
+              <div className="fd-nav-label"><span>{group}</span><small>{GROUP_EN[group]}</small></div>
+              {visibleNav.filter((item) => item.group === group).map((item) => (
+                <button
+                  type="button"
+                  key={item.key}
+                  className={`fd-nav-item ${selected?.path === item.path ? "is-active" : ""}`}
+                  onClick={() => go(item.path)}
+                >
+                  <span className="fd-nav-icon" aria-hidden="true">{item.icon}</span>
+                  <span>{item.label}</span>
+                  {item.key === "risk" && <span className="fd-nav-signal" aria-label="风险事件提醒" />}
+                </button>
+              ))}
+            </section>
+          ))}
+        </nav>
+        <div className="fd-sidebar-footer">
+          <Avatar size={34} className="fd-user-avatar">{(session?.display_name ?? "?").slice(0, 1)}</Avatar>
+          <div className="fd-user-copy">
+            <strong>{session?.display_name ?? "未登录"}</strong>
+            <span>{session ? `${ROLE_LABEL[session.role]} · 内部系统` : ""}</span>
           </div>
-          {!collapsed && (
-            <div style={{ lineHeight: 1.2 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>基金估值看板</div>
-              <div style={{ fontSize: 11, color: "#7E92B0", fontFamily: "var(--mono)" }}>
-                valuation · v0.1
-              </div>
-            </div>
-          )}
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={selected}
-          openKeys={openKeys}
-          onOpenChange={setOpenKeys}
-          items={items}
-          onClick={({ key }) => navigate(key)}
-        />
-      </Sider>
-      <Layout>
-        <Header
-          style={{
-            background: "#fff",
-            borderBottom: "1px solid var(--rule)",
-            padding: "0 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            height: 56,
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-          }}
-        >
-          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            {ALL_NAV.find((n) => loc.pathname.startsWith(n.path))?.label ?? ""}
-          </Typography.Text>
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-              <Avatar size={30} style={{ background: "var(--ink)", fontFamily: "var(--mono)", fontSize: 12 }}>
-                {(session?.display_name ?? "?").slice(0, 1)}
-              </Avatar>
-              <div style={{ lineHeight: 1.2 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{session?.display_name}</div>
-                <div style={{ fontSize: 11, color: "var(--text-2)" }}>
-                  {session ? ROLE_LABEL[session.role] : ""}
-                </div>
-              </div>
-            </div>
+          <Dropdown menu={userMenu} placement="topRight">
+            <button type="button" className="fd-icon-button" aria-label="打开用户菜单" title="用户菜单">...</button>
           </Dropdown>
-        </Header>
-        <Content>
-          <Outlet />
-        </Content>
-      </Layout>
-    </Layout>
+        </div>
+      </aside>
+      <main className="fd-main">
+        <header className="fd-topbar">
+          <div className="fd-topbar-left">
+            <button type="button" className="fd-mobile-menu" aria-label="打开导航" onClick={() => setMobileOpen(true)}>☰</button>
+            <span className="fd-breadcrumb">{selected?.label ?? "基金运营"}</span>
+            <span className="fd-breadcrumb-separator">/</span>
+            <span className="fd-breadcrumb-muted">数据工作台</span>
+          </div>
+          <div className="fd-topbar-actions">
+            <span className="fd-freshness"><i /> 已发布数据</span>
+            <span className="fd-topbar-date">服务端校验 · Cookie 会话</span>
+          </div>
+        </header>
+        <div className="fd-content"><Outlet /></div>
+      </main>
+    </div>
   );
 }

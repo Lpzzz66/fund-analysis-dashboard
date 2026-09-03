@@ -1,60 +1,75 @@
-import type { ThemeConfig } from "antd";
+import { theme as antdTheme, type ThemeConfig } from "antd";
 
 /**
  * Design tokens for the fund valuation dashboard.
- * Deliberately departs from default Ant Design look: deep ink navy chrome,
- * cool paper canvas, signal-blue accent, and a monospace numeric typeface
- * that makes figures the visual identity of the terminal.
+ * Warm operations-terminal palette shared with the private-fund operations
+ * board: charcoal surfaces, parchment text, bronze actions and restrained
+ * semantic colors.
  */
-const ink = "#0F1B2D";
-const paper = "#F6F8FB";
-const rule = "#E3E8F0";
-const accent = "#1F6FEB";
-const amber = "#C2740B";
-const crimson = "#D43F3F";
-const sage = "#2F855A";
+const page = "#131312";
+const panel = "#1A1A1A";
+const panelSoft = "#22201D";
+const sidebar = "#0D0D0C";
+const text = "#E7DED1";
+const textStrong = "#F3ECE2";
+const muted = "#9F9587";
+const mutedStrong = "#C0B5A7";
+const rule = "#34312C";
+const ruleStrong = "#4A443B";
+const accent = "#9C6B30";
+const accentDark = "#B98545";
+const amber = "#C39758";
+const crimson = "#D16F63";
+const sage = "#71A28A";
 
 export const theme: ThemeConfig = {
+  algorithm: antdTheme.darkAlgorithm,
   token: {
     colorPrimary: accent,
     colorInfo: accent,
     colorSuccess: sage,
     colorWarning: amber,
     colorError: crimson,
-    colorTextBase: ink,
-    colorBgBase: paper,
-    borderRadius: 6,
+    colorTextBase: text,
+    colorText: text,
+    colorTextSecondary: muted,
+    colorBgBase: page,
+    borderRadius: 8,
     fontFamily:
       'Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif',
     fontSize: 14,
-    colorBgLayout: paper,
+    colorBgLayout: page,
     colorBorder: rule,
     colorBorderSecondary: rule,
-    colorBgContainer: "#FFFFFF",
+    colorBgContainer: panel,
+    colorFillAlter: panelSoft,
+    colorFillSecondary: "#26231F",
+    colorBgElevated: "#25221E",
     wireframe: false,
   },
   components: {
     Layout: {
-      headerBg: ink,
-      siderBg: ink,
-      bodyBg: paper,
-      triggerBg: "#16273D",
-      triggerColor: "#C9D6E8",
+      headerBg: panel,
+      siderBg: sidebar,
+      bodyBg: page,
+      triggerBg: "#191714",
+      triggerColor: mutedStrong,
     },
     Menu: {
       darkItemBg: "transparent",
       darkSubMenuItemBg: "transparent",
-      darkItemSelectedBg: "rgba(31,111,235,0.22)",
+      darkItemSelectedBg: "rgba(156,107,48,0.24)",
       darkItemHoverBg: "rgba(255,255,255,0.06)",
-      darkItemColor: "#9FB2CD",
-      darkItemSelectedColor: "#FFFFFF",
+      darkItemColor: "#A99E90",
+      darkItemSelectedColor: textStrong,
       itemHeight: 38,
       itemMarginInline: 0,
+      itemBorderRadius: 8,
     },
     Table: {
-      headerBg: "#EEF2F8",
-      headerColor: "#3B4F70",
-      rowHoverBg: "#F0F5FB",
+      headerBg: panelSoft,
+      headerColor: mutedStrong,
+      rowHoverBg: "#2A2723",
       borderColor: rule,
       cellPaddingInline: 12,
       cellPaddingBlock: 9,
@@ -63,22 +78,34 @@ export const theme: ThemeConfig = {
       borderRadiusLG: 8,
       paddingLG: 18,
       colorBorderSecondary: rule,
+      colorBgContainer: panel,
     },
     Button: {
       primaryShadow: "none",
-      defaultBorderColor: rule,
+      defaultColor: mutedStrong,
+      defaultBg: panelSoft,
+      defaultHoverBg: "#302B25",
+      defaultHoverColor: textStrong,
+      defaultHoverBorderColor: accentDark,
       controlHeight: 32,
     },
     Tag: {
       defaultBg: "transparent",
+      defaultColor: mutedStrong,
     },
     Modal: {
       borderRadiusLG: 8,
+      contentBg: panel,
+      headerBg: panel,
     },
     Drawer: {
       borderRadiusLG: 0,
+      colorBgElevated: panel,
     },
+    Input: { colorBgContainer: panelSoft, colorBorder: ruleStrong, activeBorderColor: accentDark, hoverBorderColor: accentDark },
+    Select: { colorBgContainer: panelSoft, colorBorder: ruleStrong, optionSelectedBg: "#3B2A19" },
+    Tabs: { itemColor: muted, itemSelectedColor: accentDark, itemHoverColor: textStrong, inkBarColor: accentDark },
   },
 };
 
-export const palette = { ink, paper, rule, accent, amber, crimson, sage };
+export const palette = { page, panel, panelSoft, sidebar, text, textStrong, muted, mutedStrong, rule, ruleStrong, accent, accentDark, amber, crimson, sage };
