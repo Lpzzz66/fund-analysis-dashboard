@@ -418,6 +418,8 @@ def _overview_funds(
                 "id": version.fund_id,
                 "name": view.fund.standard_name,
                 "valuation_date": version.valuation_date.isoformat(),
+                "total_assets": _decimal(snapshot.total_assets) if snapshot else None,
+                "net_asset_value": _decimal(snapshot.net_asset_value) if snapshot else None,
                 "unit_nav": _decimal(snapshot.unit_nav) if snapshot else None,
                 "daily_return": _decimal(
                     metric.daily_return

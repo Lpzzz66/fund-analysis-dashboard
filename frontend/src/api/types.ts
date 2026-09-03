@@ -33,7 +33,7 @@ export interface ChangePasswordInput {
   new_password: string;
 }
 
-export interface DashboardFund { id: number; name: string; valuation_date: string; unit_nav: string | null; daily_return: string | null; analysis_status: string; analysis_run_id: number | null; }
+export interface DashboardFund { id: number; name: string; valuation_date: string; total_assets: string | null; net_asset_value: string | null; unit_nav: string | null; daily_return: string | null; analysis_status: string; analysis_run_id: number | null; }
 export interface DashboardOverview { as_of: string | null; total_net_assets: string | null; fund_count: number; company_index: string | null; company_daily_return: string | null; risk_event_count: number; quality_status: import("@/utils/constants").QualityStatus; funds: DashboardFund[]; }
 export interface DashboardOverviewResponse { data: DashboardOverview; meta: { as_of: string | null; coverage: { available: number; total: number }; analysis_status: string; analysis_run_id: number | null }; }
 export interface FundListItem { id: number; name: string; product_code: string | null; status: import("@/utils/constants").FundStatus; current_version_id: number | null; valuation_date: string | null; unit_nav: string | null; daily_return: string | null; quality_status: import("@/utils/constants").QualityStatus; analysis_status: string; analysis_run_id: number | null; }
