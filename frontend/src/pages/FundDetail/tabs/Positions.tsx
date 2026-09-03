@@ -46,7 +46,7 @@ export function PositionsTab({ fundId }: { fundId: number }) {
   return (
     <div>
       {error && <Alert type="error" showIcon message={error} />}
-      <Card title="当前持仓" extra={<button type="button" className="fd-source-link" onClick={() => void exportPositions()}>导出</button>}>
+      <Card className="fd-detail-positions" title="持仓分析" extra={<button type="button" className="fd-source-link" onClick={() => void exportPositions()}>导出</button>}>
         <Table
           rowKey={(r) => `${r.security_code ?? ""}-${r.account ?? ""}`}
           size="small"

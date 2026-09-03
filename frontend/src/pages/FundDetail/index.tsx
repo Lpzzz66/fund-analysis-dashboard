@@ -1,22 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Card, Col, Descriptions, Row, Skeleton, Space, Table, Tabs, Tag } from "antd";
+import { useEffect, useState } from "react";
+import { Alert, Card, Col, Descriptions, Row, Skeleton, Space, Tabs, Tag } from "antd";
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import * as fundsApi from "@/api/funds";
 import type { FundDetail as FundDetailData } from "@/api/types";
-import { QualityBadge, Num } from "@/components";
+import { QualityBadge } from "@/components";
 import { compactMoney, dateStr, dec, pct, returnColor } from "@/utils/format";
 import NavSeriesTab from "./tabs/NavSeries";
 import { PositionsTab } from "./tabs/Positions";
 import { QualityTab } from "./tabs/Quality";
-
-const returnPeriods = [
-  { key: "daily", label: "今日" },
-  { key: "wtd", label: "本周" },
-  { key: "mtd", label: "本月" },
-  { key: "qtd", label: "本季度" },
-  { key: "ytd", label: "本年" },
-  { key: "cumulative", label: "成立以来" },
-] as const;
 
 export default function FundDetail() {
   const { id } = useParams();
@@ -33,26 +24,17 @@ export default function FundDetail() {
       .catch(() => setError("产品详情加载失败，请返回产品列表重试"));
   }, [fundId]);
 
-  const returnRows = useMemo(
-    () => (fund ? returnPeriods.map((period) => ({
-      key: period.key,
-      period: period.label,
-      value: fund.period_returns[period.key],
-    })) : []),
-    [fund],
-  );
-
   if (!Number.isInteger(fundId)) return <Navigate to="/funds" replace />;
   if (error) return <div className="fd-page"><Alert type="error" showIcon message={error} /></div>;
   if (!fund) return <Skeleton active style={{ padding: 40 }} />;
 
-  const activeTab = ["nav", "positions", "quality"].includes(params.get("tab") ?? "") ? params.get("tab")! : "nav";
+  const activeTab = ["nav", "quality"].includes(params.get("tab") ?? "") ? params.get("tab")! : "nav";
   return (
     <div className="fd-page">
-      <Card style={{ marginBottom: 12 }}>
+      <Card className="fd-detail-summary" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Space>
-            <h1 style={{ margin: 0, fontSize: 24 }}>{fund.name}</h1>
+            <h1 className="fd-detail-title">{fund.name}</h1>
             <Tag color={fund.status === "active" ? "success" : "default"}>{fund.status === "active" ? "启用" : "停用"}</Tag>
           </Space>
           <Row gutter={[10, 10]} className="fd-detail-metrics">
@@ -61,7 +43,7 @@ export default function FundDetail() {
             <Col xs={12} sm={6}><div className="fd-kpi fd-detail-metric"><div className="fd-kpi__label">单位净值</div><div className="fd-kpi__value">{dec(fund.unit_nav, 4)}</div></div></Col>
             <Col xs={12} sm={6}><div className="fd-kpi fd-detail-metric"><div className="fd-kpi__label">日收益 / 累计</div><div className="fd-kpi__value fd-detail-return"><span style={{ color: returnColor(fund.daily_return) }}>{pct(fund.daily_return)}</span><span style={{ color: returnColor(fund.cumulative_return) }}>{pct(fund.cumulative_return)}</span></div></div></Col>
           </Row>
-          <Descriptions size="small" column={{ xs: 1, sm: 3 }}>
+          <Descriptions className="fd-detail-meta" size="small" column={{ xs: 1, sm: 3 }}>
             <Descriptions.Item label="产品代码">{fund.product_code ?? "—"}</Descriptions.Item>
             <Descriptions.Item label="估值日">{dateStr(fund.valuation_date)}</Descriptions.Item>
             <Descriptions.Item label="质量"><QualityBadge status={fund.quality_status} /></Descriptions.Item>
@@ -70,25 +52,13 @@ export default function FundDetail() {
         </Space>
       </Card>
 
-      <Card style={{ marginBottom: 12 }} title={<span className="fd-section-title">收益分析</span>}>
-        <Table
-          rowKey="key"
-          size="small"
-          pagination={false}
-          dataSource={returnRows}
-          columns={[
-            { title: "期间", dataIndex: "period" },
-            { title: "净值收益率", dataIndex: "value", align: "right", render: (value: string | null) => <Num style={{ color: returnColor(value) }}>{pct(value)}</Num> },
-          ]}
-        />
-      </Card>
+      <PositionsTab fundId={fundId} />
 
       <Tabs
         activeKey={activeTab}
         onChange={(key) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("tab", key); return next; })}
         items={[
           { key: "nav", label: "历史净值走势", children: <NavSeriesTab fundId={fundId} /> },
-          { key: "positions", label: "持仓分析", children: <PositionsTab fundId={fundId} /> },
           { key: "quality", label: "数据质量", children: <QualityTab fundId={fundId} /> },
         ]}
       />

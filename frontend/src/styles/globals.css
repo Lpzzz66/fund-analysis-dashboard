@@ -159,6 +159,17 @@ a:hover { color: var(--text-strong); text-decoration: none; }
 .fd-kpi__sub { margin-top: 10px; color: var(--muted-strong); font-size: 13px; }
 .fd-detail-metric { min-height: 112px; }
 .fd-detail-return { display: flex; flex-direction: column; gap: 4px; font-size: 19px; }
+.fd-detail-title { margin: 0; color: var(--text-strong); font-size: 32px; font-weight: 750; line-height: 1.2; }
+.fd-detail-summary .fd-kpi__label { font-size: 15px; font-weight: 650; }
+.fd-detail-summary .fd-kpi__value { font-size: 35px; font-weight: 750; }
+.fd-detail-summary .fd-detail-return { font-size: 22px; font-weight: 700; }
+.fd-detail-meta .ant-descriptions-item-label, .fd-detail-meta .ant-descriptions-item-content { font-size: 15px !important; font-weight: 600; }
+.fd-detail-positions { margin-bottom: 12px; }
+.fd-detail-positions .ant-card-head-title { font-size: 20px; font-weight: 700; }
+.fd-detail-positions .ant-table-thead > tr > th { font-size: 15px; font-weight: 700; }
+.fd-detail-positions .ant-table-tbody > tr > td { font-size: 15px; font-weight: 600; }
+.fd-detail-positions .ant-table-tbody .num { font-size: 15px; font-weight: 650; }
+.fd-page > .ant-tabs .ant-tabs-tab { font-size: 16px; font-weight: 650; }
 .fd-source-link { padding: 0; border: 0; border-bottom: 1px dashed var(--border-strong); color: var(--primary-dark); background: transparent; font-size: 12px; cursor: pointer; }
 .fd-source-link:hover { color: var(--text-strong); border-bottom-color: var(--primary-dark); }
 .fd-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 12px; }
@@ -281,6 +292,10 @@ a:hover { color: var(--text-strong); text-decoration: none; }
   .fd-ribbon__cell:nth-child(2) { border-right: 0; }
   .fd-ribbon__cell:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
   .fd-kpi__value { font-size: 23px; }
+  .fd-detail-title { font-size: 26px; }
+  .fd-detail-summary .fd-kpi__value { font-size: 26px; }
+  .fd-detail-summary .fd-detail-return { font-size: 19px; }
+  .fd-detail-positions .ant-table-thead > tr > th, .fd-detail-positions .ant-table-tbody > tr > td { font-size: 14px; }
   .fd-topbar-actions { gap: 0; }
   .fd-login--setup .fd-login__card { width: calc(100% - 24px); padding: 28px 20px 24px; }
   .fd-login__brand-row strong { font-size: 15px; }
