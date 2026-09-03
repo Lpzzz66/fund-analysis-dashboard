@@ -166,6 +166,14 @@ a:hover { color: var(--text-strong); text-decoration: none; }
 .fd-detail-positions .ant-table-thead > tr > th { font-size: 15px; font-weight: 700; }
 .fd-detail-positions .ant-table-tbody > tr > td { font-size: 15px; font-weight: 600; }
 .fd-detail-positions .ant-table-tbody .num { font-size: 15px; font-weight: 650; }
+.fd-quality-summary__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.fd-quality-summary__label { color: var(--muted-strong); font-size: 14px; font-weight: 650; }
+.fd-quality-summary__title { display: block; margin-top: 4px; color: var(--text-strong); font-size: 24px; font-weight: 750; }
+.fd-quality-summary__meta { margin-top: 6px; color: var(--muted); font-size: 14px; }
+.fd-quality-summary__stats { margin-top: 18px; }
+.fd-quality-summary__stats .ant-tag { padding: 4px 10px; font-size: 14px; }
+.fd-quality-issues { display: grid; gap: 10px; }
+.fd-quality-issue { display: flex; align-items: flex-start; gap: 10px; color: var(--text); font-size: 15px; line-height: 1.5; }
 .fd-page > .ant-tabs .ant-tabs-tab { font-size: 16px; font-weight: 650; }
 .fd-source-link { padding: 0; border: 0; border-bottom: 1px dashed var(--border-strong); color: var(--primary-dark); background: transparent; font-size: 12px; cursor: pointer; }
 .fd-source-link:hover { color: var(--text-strong); border-bottom-color: var(--primary-dark); }
