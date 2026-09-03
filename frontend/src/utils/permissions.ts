@@ -3,7 +3,7 @@ import type { UserRole } from "./constants";
 /**
  * Permission model mirrors the role matrix in docs/产品与功能范围.md.
  * viewer: read-only, no write buttons anywhere.
- * operator: + upload/import, review/publish, maintain funds/subjects/rules, read audit.
+ * operator: + upload/import, review/publish, and data operations.
  * admin: everything incl. user management & system settings.
  */
 const MATRIX = {
@@ -97,11 +97,7 @@ export function navForRole(role: UserRole): string[] {
       "funds",
       "imports",
       "reviews",
-      "adminFunds",
-      "adminSubjects",
-      "adminRiskRules",
       "mail",
-      "adminAudit",
     ];
   return ["dashboard", "risk", "funds"];
 }

@@ -57,8 +57,6 @@ export function PositionsTab({ fundId }: { fundId: number }) {
           columns={[
             { title: "证券代码", dataIndex: "security_code" },
             { title: "证券名称", dataIndex: "security_name" },
-            { title: "市场", dataIndex: "market" },
-            { title: "账户", dataIndex: "account" },
             { title: "数量", dataIndex: "quantity", align: "right", render: (v: string | null) => <Num>{dec(v, 0)}</Num> },
             { title: "市价", dataIndex: "market_price", align: "right", render: (v: string | null) => <Num>{dec(v, 2)}</Num> },
             { title: "市值", dataIndex: "market_value", align: "right", render: (v: string | null) => <Num>{dec(v, 2)}</Num> },
