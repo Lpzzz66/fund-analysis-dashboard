@@ -155,7 +155,7 @@ a:hover { color: var(--text-strong); text-decoration: none; }
 .fd-kpi { min-height: 128px; padding: 17px 18px !important; border: 1px solid var(--border); border-radius: 10px !important; background: var(--panel) !important; box-shadow: none !important; }
 .fd-kpi:hover { border-color: var(--border-strong); }
 .fd-kpi__label { color: var(--muted-strong); font-size: 13px; letter-spacing: 0.04em; }
-.fd-kpi__value { margin-top: 9px; color: var(--text-strong); font-family: var(--mono); font-size: 31px; font-weight: 650; line-height: 1.1; }
+.fd-kpi__value { margin-top: 9px; color: var(--text-strong); font-size: 31px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fd-kpi__sub { margin-top: 10px; color: var(--muted-strong); font-size: 13px; }
 .fd-detail-metric { min-height: 112px; }
 .fd-detail-return { display: flex; flex-direction: column; gap: 4px; font-size: 19px; }
