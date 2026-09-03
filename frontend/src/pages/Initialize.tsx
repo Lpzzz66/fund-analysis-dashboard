@@ -78,7 +78,18 @@ export default function Initialize() {
           </Form.Item>
           {strength > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <Progress percent={strength} size="small" showInfo={false} strokeColor={strength < 50 ? "var(--crimson)" : strength < 75 ? "var(--amber)" : "var(--sage)"} />
+              <Progress
+                percent={strength}
+                size="small"
+                showInfo={false}
+                strokeColor={
+                  strength < 50
+                    ? "var(--positive)"
+                    : strength < 75
+                      ? "var(--warning)"
+                      : "var(--negative)"
+                }
+              />
             </div>
           )}
           <Form.Item label="确认密码" name="confirm" dependencies={["password"]} rules={[{ required: true }, ({ getFieldValue }) => ({ validator(_, v) { return v === getFieldValue("password") ? Promise.resolve() : Promise.reject(new Error("两次密码不一致")); } })]}>
