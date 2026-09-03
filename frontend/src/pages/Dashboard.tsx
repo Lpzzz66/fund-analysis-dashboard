@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Row, Space, Table } from "antd";
 import {
   Area,
+  AreaChart,
   CartesianGrid,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -218,7 +218,7 @@ export default function Dashboard() {
           {navChartData.length === 0 ? <div className="fd-chart-empty">暂无可用公司净值历史</div> : (
             <div className="fd-chart fd-chart--company-nav" role="img" aria-label="由基金每日净值加权生成的组合净值走势折线图">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={navChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                <AreaChart data={navChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" minTickGap={28} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
                   <YAxis domain={["auto", "auto"]} tickFormatter={(value: number) => value.toFixed(2)} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={false} tickLine={false} width={44} />
@@ -234,7 +234,7 @@ export default function Dashboard() {
                     </linearGradient>
                   </defs>
                   <Area type="monotone" dataKey="index" name="组合净值" stroke="var(--chart)" strokeWidth={2.5} fill="url(#fd-nav-gradient)" fillOpacity={1} dot={navChartData.length === 1 ? { r: 3 } : false} connectNulls />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -249,7 +249,7 @@ export default function Dashboard() {
           {drawdownChartData.length === 0 ? <div className="fd-chart-empty">暂无可用回撤历史</div> : (
             <div className="fd-chart fd-chart--drawdown" role="img" aria-label="组合净值回撤分析折线图">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={drawdownChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                <AreaChart data={drawdownChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" minTickGap={28} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
                   <YAxis domain={["auto", 0]} tickFormatter={(value: number) => `${value.toFixed(1)}%`} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={false} tickLine={false} width={46} />
@@ -266,7 +266,7 @@ export default function Dashboard() {
                     </linearGradient>
                   </defs>
                   <Area type="monotone" dataKey="drawdownPct" name="回撤" stroke="var(--positive)" strokeWidth={2.5} fill="url(#fd-drawdown-gradient)" fillOpacity={1} dot={drawdownChartData.length === 1 ? { r: 3 } : false} connectNulls />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
