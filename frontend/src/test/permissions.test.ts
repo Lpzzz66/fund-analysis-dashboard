@@ -31,6 +31,6 @@ describe("role navigation", () => {
   });
 
   it("limits read-only users to view pages", () => {
-    expect(navForRole("viewer")).toEqual(["dashboard", "risk", "funds"]);
+    expect(navForRole("viewer")).toEqual(["dashboard", "funds"]);
   });
 });

@@ -75,7 +75,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <Navigate to="/dashboard" replace /> },
       { path: "/dashboard", element: <Page><Dashboard /></Page> },
-      { path: "/risk", element: <Page><RiskOverview /></Page> },
+      { path: "/risk", element: <RoleGuard capability="risk"><Page><RiskOverview /></Page></RoleGuard> },
       { path: "/funds", element: <Page><Funds /></Page> },
       { path: "/funds/:id", element: <Page><FundDetail /></Page> },
       { path: "/imports", element: <RoleGuard capability="imports"><Page><Imports /></Page></RoleGuard> },

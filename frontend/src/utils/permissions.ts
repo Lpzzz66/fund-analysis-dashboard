@@ -47,7 +47,7 @@ const MATRIX = {
   },
   viewer: {
     dashboard: true,
-    risk: true,
+    risk: false,
     funds: true,
     imports: false,
     reviews: false,
@@ -99,5 +99,5 @@ export function navForRole(role: UserRole): string[] {
       "reviews",
       "mail",
     ];
-  return ["dashboard", "risk", "funds"];
+  return ["dashboard", "funds"];
 }

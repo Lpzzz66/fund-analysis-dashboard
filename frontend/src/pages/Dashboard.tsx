@@ -14,6 +14,8 @@ import { Link, useNavigate } from "react-router-dom";
 import * as dashboardApi from "@/api/dashboard";
 import * as downloads from "@/api/downloads";
 import { PageHeader, StatusRibbon, Num, QualityBadge, useToast } from "@/components";
+import { useAuth } from "@/app/auth";
+import { can } from "@/utils/permissions";
 import { compactMoney, dec, dateStr, pct, returnColor } from "@/utils/format";
 import type { DashboardOverview, DashboardSeries, DashboardSeriesPoint } from "@/api/types";
 
@@ -54,6 +56,7 @@ function cutoffForPeriod(points: DashboardSeriesPoint[], period: SeriesPeriod): 
 }
 
 export default function Dashboard() {
+  const { session } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
@@ -146,7 +149,7 @@ export default function Dashboard() {
           <Space>
             <Button onClick={() => void load()} loading={loading}>刷新</Button>
             <Button onClick={() => void exportOverview()}>导出总览</Button>
-            <Button onClick={() => navigate("/risk")}>风险事件</Button>
+            {can(session?.role, "risk") && <Button onClick={() => navigate("/risk")}>风险事件</Button>}
           </Space>
         }
       />
