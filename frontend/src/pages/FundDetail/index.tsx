@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Card, Col, Descriptions, Row, Skeleton, Space, Tabs, Tag } from "antd";
-import { Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import * as fundsApi from "@/api/funds";
 import type { FundDetail as FundDetailData } from "@/api/types";
 import { QualityBadge } from "@/components";
@@ -11,7 +11,6 @@ import { QualityTab } from "./tabs/Quality";
 
 export default function FundDetail() {
   const { id } = useParams();
-  const [params, setParams] = useSearchParams();
   const [fund, setFund] = useState<FundDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rawId = Number(id);
@@ -28,7 +27,6 @@ export default function FundDetail() {
   if (error) return <div className="fd-page"><Alert type="error" showIcon message={error} /></div>;
   if (!fund) return <Skeleton active style={{ padding: 40 }} />;
 
-  const activeTab = ["nav", "quality"].includes(params.get("tab") ?? "") ? params.get("tab")! : "nav";
   return (
     <div className="fd-page">
       <Card className="fd-detail-summary" style={{ marginBottom: 12 }}>
@@ -52,13 +50,13 @@ export default function FundDetail() {
         </Space>
       </Card>
 
+      <NavSeriesTab fundId={fundId} />
+
       <PositionsTab fundId={fundId} />
 
       <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("tab", key); return next; })}
+        activeKey="quality"
         items={[
-          { key: "nav", label: "历史净值走势", children: <NavSeriesTab fundId={fundId} /> },
           { key: "quality", label: "数据质量", children: <QualityTab fundId={fundId} /> },
         ]}
       />
