@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dec, timeStr, today } from "@/utils/format";
+import { compactMoney, dec, timeStr, today } from "@/utils/format";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -22,6 +22,13 @@ describe("timeStr", () => {
 describe("dec", () => {
   it("renders an empty backend value as missing", () => {
     expect(dec("")).toBe("—");
+  });
+});
+
+describe("compactMoney", () => {
+  it("uses readable Chinese units for large asset values", () => {
+    expect(compactMoney("7992130000")).toBe("79.92 亿");
+    expect(compactMoney("12000")).toBe("1.20 万");
   });
 });
 

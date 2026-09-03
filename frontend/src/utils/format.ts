@@ -45,6 +45,17 @@ export function money(value: string | null | undefined, unit = "元"): string {
   return `${dec(value, 2)} ${unit}`;
 }
 
+/** Compact large currency values for dashboard KPI cards. */
+export function compactMoney(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  if (!isFinite(n)) return "—";
+  const absolute = Math.abs(n);
+  if (absolute >= 100000000) return `${(n / 100000000).toFixed(2)} 亿`;
+  if (absolute >= 10000) return `${(n / 10000).toFixed(2)} 万`;
+  return `${n.toFixed(2)} 元`;
+}
+
 /** Format an ISO date/datetime string to YYYY-MM-DD. */
 export function dateStr(value: string | null | undefined): string {
   if (!value) return "—";
@@ -72,12 +83,12 @@ export function timeStr(value: string | null | undefined): string {
 
 /** Sign-colored value for returns. */
 export function returnColor(value: string | null | undefined): string {
-  if (value === null || value === undefined) return "var(--text-2)";
+  if (value === null || value === undefined) return "var(--muted)";
   const n = Number(value);
-  if (!isFinite(n)) return "var(--text-2)";
-  if (n > 0) return "var(--sage)";
-  if (n < 0) return "var(--crimson)";
-  return "var(--text-2)";
+  if (!isFinite(n)) return "var(--muted)";
+  if (n > 0) return "var(--negative)";
+  if (n < 0) return "var(--positive)";
+  return "var(--muted)";
 }
 
 /** Today as ISO date. */

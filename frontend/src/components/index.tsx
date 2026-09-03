@@ -161,7 +161,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         onOk={() => close(opts?.reasonRequired ? reason.trim() || null : reason.trim() || "")}
         destroyOnClose
       >
-        {opts?.description && <p style={{ color: "var(--text-2)" }}>{opts.description}</p>}
+        {opts?.description && <p style={{ color: "var(--muted)" }}>{opts.description}</p>}
         <Form layout="vertical" style={{ marginTop: 8 }}>
           <Form.Item label={opts?.reasonLabel ?? "操作原因"} required={opts?.reasonRequired}>
             <Input.TextArea

@@ -513,6 +513,8 @@ def fund_detail(
         if version and analysis_status == "ready"
         else None
     )
+    snapshot = _snapshot(session, version.id) if version else None
+    metric = _metric_for_version(session, version) if version else None
     aliases = session.scalars(
         select(FundAlias)
         .where(FundAlias.fund_id == fund.id)
@@ -563,6 +565,20 @@ def fund_detail(
             else "pending",
             "analysis_status": analysis_status,
             "analysis_run_id": analysis_run.id if analysis_run else None,
+            "total_assets": _decimal(snapshot.total_assets) if snapshot else None,
+            "net_asset_value": _decimal(snapshot.net_asset_value) if snapshot else None,
+            "unit_nav": _decimal(snapshot.unit_nav) if snapshot else None,
+            "cumulative_unit_nav": (
+                _decimal(snapshot.cumulative_unit_nav) if snapshot else None
+            ),
+            "daily_return": _decimal(
+                metric.daily_return
+                if metric is not None
+                else snapshot.daily_return
+                if snapshot
+                else None
+            ),
+            "cumulative_return": _decimal(metric.cumulative_return) if metric else None,
         }
     }
 

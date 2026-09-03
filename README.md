@@ -149,6 +149,15 @@ python -m venv .venv
 
 开发默认 SQLite（本地数据库）为 `data/dev.db`；生产环境若 `APP_ENV=production`（生产环境）未提供 PostgreSQL `DATABASE_URL`（数据库连接地址）、上传临时目录和源文件目录，应用会拒绝启动。
 
+首次做界面联调时，可在迁移完成后写入一套仅限本地的演示数据：
+
+```powershell
+Set-Location F:\AgentWorks\基金分析看板\backend
+..\.venv\Scripts\python.exe -m app.dev_seed
+```
+
+该脚本生成 15 只基金、45 个估值日、净值序列、最新持仓和少量风险样例；数据使用 `DEMO-` 产品代码标记，重复执行会自动跳过，不会读取或写入生产配置。
+
 ### 前端
 
 另开一个终端：
