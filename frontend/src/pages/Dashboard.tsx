@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Row, Space, Table } from "antd";
 import {
+  Area,
   CartesianGrid,
-  Line,
   LineChart,
   ReferenceLine,
   ResponsiveContainer,
@@ -58,7 +58,6 @@ export default function Dashboard() {
   const toast = useToast();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [series, setSeries] = useState<DashboardSeries | null>(null);
-  const [coverage, setCoverage] = useState({ available: 0, total: 0 });
   const [period, setPeriod] = useState<SeriesPeriod>("1m");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +71,6 @@ export default function Dashboard() {
         dashboardApi.getSeries(),
       ]);
       setOverview(overviewResult.data);
-      setCoverage(overviewResult.meta.coverage);
       setSeries(seriesResult.data);
     } catch {
       setError("总览数据加载失败，请刷新重试");
@@ -122,12 +120,28 @@ export default function Dashboard() {
     const current = allSeriesPoints[allSeriesPoints.length - 1]?.drawdown ?? null;
     return { max: values.length ? String(Math.min(...values)) : null, current };
   }, [allSeriesPoints]);
-
+  const fundRows = overview?.funds ?? [];
+  const latestAsOf = useMemo(
+    () => fundRows.reduce<string | null>((latest, fund) => {
+      if (!fund.valuation_date) return latest;
+      return !latest || fund.valuation_date > latest ? fund.valuation_date : latest;
+    }, null),
+    [fundRows],
+  );
+  const latestCoverage = useMemo(() => {
+    const total = fundRows.length;
+    const available = latestAsOf
+      ? fundRows.filter((fund) => fund.valuation_date === latestAsOf).length
+      : 0;
+    return { available, total };
+  }, [fundRows, latestAsOf]);
   return (
     <div className="fd-page">
       <PageHeader
         title="公司总览"
-        desc="查看已发布估值数据的规模、收益、风险和覆盖情况"
+        desc={latestAsOf
+          ? `截至 ${latestAsOf} · 管理 ${overview?.fund_count ?? 0} 只产品 · 最新估值覆盖 ${latestCoverage.available}/${latestCoverage.total}`
+          : "查看已发布估值数据的规模、收益、风险和覆盖情况"}
         extra={
           <Space>
             <Button onClick={() => void load()} loading={loading}>刷新</Button>
@@ -138,42 +152,42 @@ export default function Dashboard() {
       />
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
       <StatusRibbon
-        asOf={overview?.as_of ?? null}
+        asOf={latestAsOf}
         version={null}
-        coverage={coverage}
+        coverage={latestCoverage}
         quality={overview?.quality_status ?? "pending"}
       />
       <Row gutter={[12, 12]} style={{ marginTop: 16 }}>
         <Col xs={24} sm={12} lg={6}>
-          <Card className="fd-kpi">
-            <div className="fd-kpi__label">总净资产</div>
+          <Card className="fd-kpi fd-kpi--hero">
+            <div className="fd-kpi__label">管理规模</div>
             <div className="fd-kpi__value">{compactMoney(overview?.total_net_assets)}</div>
-            <div className="fd-kpi__sub">{overview?.fund_count ?? 0} 只产品</div>
+            <div className="fd-kpi__sub">各产品最新已发布净资产合计</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card className="fd-kpi">
-            <div className="fd-kpi__label">公司日收益</div>
+            <div className="fd-kpi__label">组合日变动</div>
             <div className="fd-kpi__value" style={{ color: returnColor(overview?.company_daily_return) }}>
               {pct(overview?.company_daily_return)}
             </div>
-            <div className="fd-kpi__sub">后端已计算结果</div>
+            <div className="fd-kpi__sub">{latestAsOf ?? "—"} 估值日</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card className="fd-kpi">
-            <div className="fd-kpi__label">待处理风险事件</div>
-            <div className="fd-kpi__value">{overview?.risk_event_count ?? "—"}</div>
-            <div className="fd-kpi__sub">来自风险事件记录</div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="fd-kpi">
-            <div className="fd-kpi__label">数据覆盖率</div>
+            <div className="fd-kpi__label">最新估值覆盖</div>
             <div className="fd-kpi__value">
-              {coverage.total ? `${Math.round((coverage.available / coverage.total) * 100)}%` : "—"}
+              {latestCoverage.total ? `${Math.round((latestCoverage.available / latestCoverage.total) * 100)}%` : "—"}
             </div>
-            <div className="fd-kpi__sub">已发布产品 / 活跃产品</div>
+            <div className="fd-kpi__sub">{latestCoverage.available}/{latestCoverage.total} 只产品有最新数据</div>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="fd-kpi">
+            <div className="fd-kpi__label">待处理风险</div>
+            <div className="fd-kpi__value">{overview?.risk_event_count ?? "—"}</div>
+            <div className="fd-kpi__sub">需要关注的风险事件</div>
           </Card>
         </Col>
       </Row>
@@ -210,7 +224,13 @@ export default function Dashboard() {
                     labelFormatter={(_, payload) => payload[0]?.payload?.valuation_date ?? "估值日"}
                     formatter={(value: unknown) => [typeof value === "number" ? value.toFixed(4) : "—", "组合净值"]}
                   />
-                  <Line type="monotone" dataKey="index" name="组合净值" stroke="var(--chart)" strokeWidth={2} dot={navChartData.length === 1 ? { r: 3 } : false} connectNulls />
+                  <defs>
+                    <linearGradient id="fd-nav-gradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--chart)" stopOpacity={0.32} />
+                      <stop offset="100%" stopColor="var(--chart)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="index" name="组合净值" stroke="var(--chart)" strokeWidth={2.5} fill="url(#fd-nav-gradient)" fillOpacity={1} dot={navChartData.length === 1 ? { r: 3 } : false} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -236,7 +256,13 @@ export default function Dashboard() {
                     labelFormatter={(_, payload) => payload[0]?.payload?.valuation_date ?? "估值日"}
                     formatter={(value: unknown) => [typeof value === "number" ? `${value.toFixed(2)}%` : "—", "回撤"]}
                   />
-                  <Line type="monotone" dataKey="drawdownPct" name="回撤" stroke="var(--positive)" strokeWidth={2} dot={drawdownChartData.length === 1 ? { r: 3 } : false} connectNulls />
+                  <defs>
+                    <linearGradient id="fd-drawdown-gradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--positive)" stopOpacity={0.26} />
+                      <stop offset="100%" stopColor="var(--positive)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="drawdownPct" name="回撤" stroke="var(--positive)" strokeWidth={2.5} fill="url(#fd-drawdown-gradient)" fillOpacity={1} dot={drawdownChartData.length === 1 ? { r: 3 } : false} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -249,7 +275,7 @@ export default function Dashboard() {
           rowKey="id"
           size="small"
           loading={loading}
-          dataSource={overview?.funds ?? []}
+          dataSource={fundRows}
           pagination={false}
           scroll={{ x: 960 }}
           columns={[

@@ -114,10 +114,6 @@ export function AppLayout() {
             <span className="fd-breadcrumb-separator">/</span>
             <span className="fd-breadcrumb-muted">数据工作台</span>
           </div>
-          <div className="fd-topbar-actions">
-            <span className="fd-freshness"><i /> 已发布数据</span>
-            <span className="fd-topbar-date">服务端校验 · Cookie 会话</span>
-          </div>
         </header>
         <div className="fd-content"><Outlet /></div>
       </main>

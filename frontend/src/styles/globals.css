@@ -121,14 +121,11 @@ a:hover { color: var(--text-strong); text-decoration: none; }
 .fd-icon-button:hover, .fd-mobile-menu:hover { color: var(--text-strong); background: rgba(255, 255, 255, 0.07); }
 .fd-main { min-height: 100vh; margin-left: 244px; }
 .fd-topbar { height: 64px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; border-bottom: 1px solid var(--border); background: rgba(26, 26, 26, 0.94); backdrop-filter: blur(14px); }
-.fd-topbar-left, .fd-topbar-actions { display: flex; align-items: center; min-width: 0; }
+.fd-topbar-left { display: flex; align-items: center; min-width: 0; }
 .fd-topbar-left { gap: 10px; }
 .fd-breadcrumb { color: var(--text-strong); font-size: 14px; font-weight: 600; }
 .fd-breadcrumb-separator { color: #64594c; }
-.fd-breadcrumb-muted, .fd-topbar-date { color: var(--muted); font-size: 13px; }
-.fd-topbar-actions { gap: 16px; }
-.fd-freshness { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-strong); font-size: 12px; }
-.fd-freshness i { width: 7px; height: 7px; display: block; border-radius: 50%; background: var(--negative); box-shadow: 0 0 0 3px rgba(113, 162, 138, 0.14); }
+.fd-breadcrumb-muted { color: var(--muted); font-size: 13px; }
 .fd-mobile-menu { display: none; color: var(--text); font-size: 18px; }
 .fd-mobile-backdrop { display: none; }
 .fd-content { min-height: calc(100vh - 64px); }
@@ -281,7 +278,7 @@ a:hover { color: var(--text-strong); text-decoration: none; }
   .fd-mobile-backdrop.is-visible { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.56); }
   .fd-mobile-menu { display: inline-grid; place-items: center; }
   .fd-topbar { padding: 0 18px; }
-  .fd-topbar-date, .fd-breadcrumb-separator, .fd-breadcrumb-muted { display: none; }
+  .fd-breadcrumb-separator, .fd-breadcrumb-muted { display: none; }
   .fd-page { padding: 24px 18px 38px; }
   .fd-chart-grid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -296,7 +293,6 @@ a:hover { color: var(--text-strong); text-decoration: none; }
   .fd-detail-summary .fd-kpi__value { font-size: 26px; }
   .fd-detail-summary .fd-detail-return { font-size: 19px; }
   .fd-detail-positions .ant-table-thead > tr > th, .fd-detail-positions .ant-table-tbody > tr > td { font-size: 14px; }
-  .fd-topbar-actions { gap: 0; }
   .fd-login--setup .fd-login__card { width: calc(100% - 24px); padding: 28px 20px 24px; }
   .fd-login__brand-row strong { font-size: 15px; }
   .fd-mail-meta { align-items: flex-start; flex-direction: column; gap: 4px; }
