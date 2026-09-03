@@ -162,16 +162,20 @@ a:hover { color: var(--text-strong); text-decoration: none; }
 .fd-source-link { padding: 0; border: 0; border-bottom: 1px dashed var(--border-strong); color: var(--primary-dark); background: transparent; font-size: 12px; cursor: pointer; }
 .fd-source-link:hover { color: var(--text-strong); border-bottom-color: var(--primary-dark); }
 .fd-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 12px; }
-.fd-chart-grid--positions { margin-top: 0; margin-bottom: 12px; }
+.fd-chart-grid--dashboard { grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); }
 .fd-chart-card { min-width: 0; }
 .fd-chart-card .ant-card-body { padding: 14px 18px 18px; }
 .fd-chart { width: 100%; height: 320px; min-width: 0; }
-.fd-chart--assets { height: 330px; }
-.fd-chart--returns { height: 430px; }
 .fd-chart--nav { height: 360px; }
-.fd-chart--positions-pie { height: 330px; }
-.fd-chart--holdings { height: 330px; }
+.fd-chart--company-nav, .fd-chart--drawdown { height: 320px; }
 .fd-chart-empty { min-height: 280px; display: grid; place-items: center; color: var(--muted); }
+.fd-chart-note { margin-top: -2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.fd-chart-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 4px; }
+.fd-chart-stats > div { min-width: 0; padding: 10px 12px; border-left: 2px solid var(--border-strong); background: var(--panel-soft); }
+.fd-chart-stats span, .fd-chart-stats strong { display: block; }
+.fd-chart-stats span { color: var(--muted-strong); font-size: 12px; }
+.fd-chart-stats strong { margin-top: 6px; font-family: var(--mono); font-size: 20px; font-weight: 650; }
+.fd-period-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .fd-chart .recharts-text { fill: var(--muted-strong); }
 .fd-chart .recharts-legend-item-text { color: var(--muted-strong) !important; }
 .fd-chart .recharts-tooltip-wrapper { outline: none; }

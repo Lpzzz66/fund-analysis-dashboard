@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.base import AnalysisRunStatus, FundStatus, ValuationStatus
 from app.db.models import (
     AnalysisRun,
+    CompanyMetricDaily,
     FundMetricDaily,
     ValuationVersion,
 )
@@ -63,6 +64,73 @@ def test_dashboard_has_date_and_pagination_filters(
     assert response.json()["data"][0]["name"] == "千金一号"
     assert overview.status_code == 200
     assert overview.json()["data"]["total_net_assets"] == "90000.0000000000"
+
+
+def test_dashboard_series_uses_company_metrics_for_nav_and_drawdown(
+    admin_client, app_and_engine
+) -> None:
+    engine = app_and_engine[1]
+    dates = [date(2026, 8, 23), date(2026, 8, 24), date(2026, 8, 25)]
+    version_ids = [
+        seed_published_fund(
+            engine,
+            name=f"组合序列产品{index}",
+            valuation_date=valuation_date,
+        )[1]
+        for index, valuation_date in enumerate(dates, start=1)
+    ]
+    with Session(engine) as session:
+        run = AnalysisRun(
+            trigger_version_id=version_ids[-1],
+            trigger_reason="company_series_test",
+            input_start_date=dates[0],
+            input_end_date=dates[-1],
+            methodology_version="test-v1",
+            status=AnalysisRunStatus.SUCCEEDED,
+        )
+        session.add(run)
+        session.flush()
+        for valuation_date, company_index in zip(
+            dates,
+            (Decimal("1.0000"), Decimal("1.1000"), Decimal("1.0500")),
+            strict=True,
+        ):
+            session.add(
+                CompanyMetricDaily(
+                    valuation_date=valuation_date,
+                    source_analysis_run_id=run.id,
+                    company_index=company_index,
+                    company_daily_return=None,
+                    effective_fund_count=1,
+                    total_net_assets=Decimal(90000),
+                )
+            )
+        session.commit()
+
+    response = admin_client.get("/api/v1/dashboard/series")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [point["valuation_date"] for point in payload["data"]["points"]] == [
+        value.isoformat() for value in dates
+    ]
+    assert payload["data"]["points"][1]["company_index"] == "1.1000000000"
+    expected_drawdown = Decimal("1.05") / Decimal("1.10") - Decimal(1)
+    assert Decimal(payload["meta"]["max_drawdown"]) == expected_drawdown
+    assert Decimal(payload["meta"]["current_drawdown"]) == expected_drawdown
+
+
+def test_dashboard_series_rejects_windows_wider_than_five_years(
+    admin_client, app_and_engine
+) -> None:
+    seed_published_fund(app_and_engine[1])
+
+    response = admin_client.get(
+        "/api/v1/dashboard/series",
+        params={"start": "2019-01-01", "end": "2026-01-01"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_dashboard_reports_failed_analysis_as_stale(

@@ -19,6 +19,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analytics.company import calculate_company_index
 from app.config import get_settings
 from app.db.base import (
     AnalysisRunStatus,
@@ -117,6 +118,7 @@ def _seed_fund_history(
 ) -> tuple[ValuationVersion, ...]:
     start_date = latest_date - timedelta(days=HISTORY_DAYS - 1)
     previous_nav = _initial_nav(index)
+    nav_by_date: dict[date, Decimal] = {}
     versions: list[ValuationVersion] = []
 
     for offset in range(HISTORY_DAYS):
@@ -129,6 +131,31 @@ def _seed_fund_history(
         )
         daily_return = _nav(current_nav / prior_nav - Decimal(1)) if offset else None
         previous_nav = current_nav
+        nav_by_date[valuation_date] = current_nav
+        week_start = valuation_date - timedelta(days=valuation_date.weekday())
+        quarter_start = date(
+            valuation_date.year,
+            ((valuation_date.month - 1) // 3) * 3 + 1,
+            1,
+        )
+        initial_nav = _initial_nav(index)
+        period_returns = {
+            "wtd_return": _nav(current_nav / nav_by_date.get(week_start, initial_nav) - Decimal(1)),
+            "mtd_return": _nav(
+                current_nav
+                / nav_by_date.get(valuation_date.replace(day=1), initial_nav)
+                - Decimal(1)
+            ),
+            "qtd_return": _nav(
+                current_nav / nav_by_date.get(quarter_start, initial_nav) - Decimal(1)
+            ),
+            "ytd_return": _nav(
+                current_nav
+                / nav_by_date.get(valuation_date.replace(month=1, day=1), initial_nav)
+                - Decimal(1)
+            ),
+            "cumulative_return": _nav(current_nav / initial_nav - Decimal(1)),
+        }
         total_assets = _money(_base_assets(index) + Decimal(offset) * Decimal(450000))
         liabilities = _money(total_assets * Decimal("0.035"))
         net_assets = _money(total_assets - liabilities)
@@ -155,6 +182,7 @@ def _seed_fund_history(
                 cumulative_unit_nav=current_nav,
                 previous_unit_nav=prior_nav if offset else None,
                 daily_return=daily_return,
+                **period_returns,
             )
         )
         session.add(
@@ -297,40 +325,38 @@ def seed_demo_data(session: Session, *, latest_date: date) -> int:
         for index, fund in enumerate(funds)
     ]
 
-    latest_snapshots = [
-        session.scalar(
-            select(FundDailySnapshot).where(
-                FundDailySnapshot.valuation_version_id == histories[fund.id][-1].id
+    company_inputs: list[dict[str, object]] = []
+    for fund, history in zip(funds, histories.values(), strict=True):
+        for version in history:
+            snapshot = session.scalar(
+                select(FundDailySnapshot).where(
+                    FundDailySnapshot.valuation_version_id == version.id
+                )
             )
-        )
-        for fund in funds
-    ]
-    total_net_assets = sum(
-        (snapshot.net_asset_value for snapshot in latest_snapshots if snapshot),
-        Decimal(0),
+            if snapshot is None:
+                continue
+            company_inputs.append(
+                {
+                    "fund_id": fund.id,
+                    "valuation_date": version.valuation_date,
+                    "net_asset_value": snapshot.net_asset_value,
+                    "daily_return": snapshot.daily_return,
+                }
+            )
+    company_metrics = calculate_company_index(
+        company_inputs,
+        fund_ids=[fund.id for fund in funds],
     )
-    weighted_daily_return = (
-        sum(
-            (
-                snapshot.net_asset_value * snapshot.daily_return
-                for snapshot in latest_snapshots
-                if snapshot
-                and snapshot.net_asset_value is not None
-                and snapshot.daily_return is not None
-            ),
-            Decimal(0),
-        )
-        / total_net_assets
-    )
-    session.add(
+    session.add_all(
         CompanyMetricDaily(
-            valuation_date=latest_date,
+            valuation_date=metric.valuation_date,
             source_analysis_run_id=runs[0].id,
-            company_index=Decimal("1.0000"),
-            company_daily_return=_nav(weighted_daily_return),
-            effective_fund_count=len(funds),
-            total_net_assets=total_net_assets,
+            company_index=metric.company_index,
+            company_daily_return=metric.company_daily_return,
+            effective_fund_count=metric.effective_fund_count,
+            total_net_assets=metric.total_net_assets,
         )
+        for metric in company_metrics
     )
 
     risk_rule_definitions = (

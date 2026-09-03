@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, over, select
 from sqlalchemy.orm import Session, aliased
 
+from app.analytics.drawdown import calculate_drawdown
 from app.analytics.nav import calculate_nav_series
 from app.auth.dependencies import AuthContext, get_auth_context, get_db
 from app.db.base import (
@@ -405,6 +406,110 @@ def overview(
     }
 
 
+@router.get("/api/v1/dashboard/series")
+def dashboard_series(
+    _: CurrentContext,
+    session: DatabaseSession,
+    start: date | None = Query(default=None),  # noqa: B008
+    end: date | None = Query(default=None),  # noqa: B008
+) -> dict[str, object]:
+    """Return the company NAV index and drawdown derived from daily valuations."""
+
+    if start is not None and end is not None and (end - start).days > 365 * 5:
+        raise HTTPException(
+            status_code=422,
+            detail="窗口跨度不能超过 5 年，请缩小范围或使用导出功能",
+        )
+    latest_date = session.scalar(
+        select(func.max(ValuationVersion.valuation_date))
+        .join(Fund, Fund.id == ValuationVersion.fund_id)
+        .where(
+            ValuationVersion.status == ValuationStatus.PUBLISHED,
+            Fund.status == FundStatus.ACTIVE,
+        )
+    )
+    if latest_date is None:
+        return {
+            "data": {"methodology": "daily_nav_weighted_index", "points": []},
+            "meta": {
+                "coverage": {"available": 0, "total": 0},
+                "start": None,
+                "end": None,
+                "max_drawdown": None,
+                "current_drawdown": None,
+            },
+        }
+    end_date = end or latest_date
+    start_date = start or (end_date - timedelta(days=365))
+    if start_date > end_date:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    if (end_date - start_date).days > 365 * 5:
+        raise HTTPException(
+            status_code=422,
+            detail="窗口跨度不能超过 5 年，请缩小范围或使用导出功能",
+        )
+
+    published_date_exists = (
+        select(ValuationVersion.id)
+        .join(Fund, Fund.id == ValuationVersion.fund_id)
+        .where(
+            ValuationVersion.status == ValuationStatus.PUBLISHED,
+            Fund.status == FundStatus.ACTIVE,
+            ValuationVersion.valuation_date == CompanyMetricDaily.valuation_date,
+        )
+        .exists()
+    )
+    rows = session.execute(
+        select(CompanyMetricDaily, AnalysisRun)
+        .join(AnalysisRun, AnalysisRun.id == CompanyMetricDaily.source_analysis_run_id)
+        .where(
+            AnalysisRun.status == AnalysisRunStatus.SUCCEEDED,
+            CompanyMetricDaily.valuation_date >= start_date,
+            CompanyMetricDaily.valuation_date <= end_date,
+            published_date_exists,
+        )
+        .order_by(
+            CompanyMetricDaily.valuation_date,
+            AnalysisRun.id.desc(),
+            CompanyMetricDaily.id.desc(),
+        )
+    )
+    latest_by_date: dict[date, CompanyMetricDaily] = {}
+    for metric, _run in rows:
+        latest_by_date.setdefault(metric.valuation_date, metric)
+    metrics = [latest_by_date[day] for day in sorted(latest_by_date)]
+    drawdown = calculate_drawdown(
+        [
+            {"valuation_date": metric.valuation_date, "adjusted_nav": metric.company_index}
+            for metric in metrics
+        ]
+    )
+    drawdown_by_date = {point.valuation_date: point for point in drawdown.points}
+    points = []
+    for metric in metrics:
+        point = drawdown_by_date[metric.valuation_date]
+        points.append(
+            {
+                "valuation_date": metric.valuation_date.isoformat(),
+                "company_index": _decimal(metric.company_index),
+                "company_daily_return": _decimal(metric.company_daily_return),
+                "drawdown": _decimal(point.drawdown),
+                "total_net_assets": _decimal(metric.total_net_assets),
+                "effective_fund_count": metric.effective_fund_count,
+            }
+        )
+    return {
+        "data": {"methodology": "daily_nav_weighted_index", "points": points},
+        "meta": {
+            "coverage": {"available": len(points), "total": len(points)},
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+            "max_drawdown": _decimal(drawdown.max_drawdown),
+            "current_drawdown": _decimal(drawdown.current_drawdown),
+        },
+    }
+
+
 def _overview_funds(
     versions: list[ValuationVersion], views: dict[int, _VersionView]
 ) -> list[dict[str, object]]:
@@ -581,6 +686,20 @@ def fund_detail(
                 else None
             ),
             "cumulative_return": _decimal(metric.cumulative_return) if metric else None,
+            "period_returns": {
+                "daily": _decimal(snapshot.daily_return) if snapshot else None,
+                "wtd": _decimal(snapshot.wtd_return) if snapshot else None,
+                "mtd": _decimal(snapshot.mtd_return) if snapshot else None,
+                "qtd": _decimal(snapshot.qtd_return) if snapshot else None,
+                "ytd": _decimal(snapshot.ytd_return) if snapshot else None,
+                "cumulative": _decimal(
+                    snapshot.cumulative_return
+                    if snapshot and snapshot.cumulative_return is not None
+                    else metric.cumulative_return
+                    if metric
+                    else None
+                ),
+            },
         }
     }
 

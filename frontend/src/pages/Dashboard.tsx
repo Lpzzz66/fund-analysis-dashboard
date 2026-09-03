@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Row, Space, Table } from "antd";
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
+  Line,
+  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -15,7 +15,17 @@ import * as dashboardApi from "@/api/dashboard";
 import * as downloads from "@/api/downloads";
 import { PageHeader, StatusRibbon, Num, QualityBadge, useToast } from "@/components";
 import { compactMoney, dec, dateStr, pct, returnColor } from "@/utils/format";
-import type { DashboardOverview } from "@/api/types";
+import type { DashboardOverview, DashboardSeries, DashboardSeriesPoint } from "@/api/types";
+
+type SeriesPeriod = "1m" | "3m" | "ytd" | "1y" | "all";
+
+const periodOptions: Array<{ key: SeriesPeriod; label: string }> = [
+  { key: "1m", label: "近1月" },
+  { key: "3m", label: "近3月" },
+  { key: "ytd", label: "今年" },
+  { key: "1y", label: "近1年" },
+  { key: "all", label: "全部" },
+];
 
 const tooltipStyle = {
   backgroundColor: "var(--panel-soft)",
@@ -24,14 +34,32 @@ const tooltipStyle = {
   color: "var(--text)",
 };
 
-const shorten = (value: string, length = 9) =>
-  value.length > length ? `${value.slice(0, length)}...` : value;
+function cutoffForPeriod(points: DashboardSeriesPoint[], period: SeriesPeriod): string | null {
+  const latest = points[points.length - 1]?.valuation_date;
+  if (!latest || period === "all") return null;
+  const date = new Date(`${latest}T00:00:00`);
+  if (period === "ytd") {
+    return `${date.getFullYear()}-01-01`;
+  }
+  const originalDay = date.getDate();
+  date.setDate(1);
+  if (period === "1m") date.setMonth(date.getMonth() - 1);
+  if (period === "3m") date.setMonth(date.getMonth() - 3);
+  if (period === "1y") date.setFullYear(date.getFullYear() - 1);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(originalDay, lastDay));
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((value, index) => index === 0 ? String(value) : String(value).padStart(2, "0"))
+    .join("-");
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const toast = useToast();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const [series, setSeries] = useState<DashboardSeries | null>(null);
   const [coverage, setCoverage] = useState({ available: 0, total: 0 });
+  const [period, setPeriod] = useState<SeriesPeriod>("1m");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,9 +67,13 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const result = await dashboardApi.getOverview();
-      setOverview(result.data);
-      setCoverage(result.meta.coverage);
+      const [overviewResult, seriesResult] = await Promise.all([
+        dashboardApi.getOverview(),
+        dashboardApi.getSeries(),
+      ]);
+      setOverview(overviewResult.data);
+      setCoverage(overviewResult.meta.coverage);
+      setSeries(seriesResult.data);
     } catch {
       setError("总览数据加载失败，请刷新重试");
     } finally {
@@ -62,17 +94,34 @@ export default function Dashboard() {
     }
   }
 
-  const chartFunds = useMemo(
-    () =>
-      (overview?.funds ?? []).map((fund) => ({
-        ...fund,
-        shortName: shorten(fund.name),
-        totalAssetsBn: Number(fund.total_assets ?? 0) / 100_000_000,
-        netAssetValueBn: Number(fund.net_asset_value ?? 0) / 100_000_000,
-        dailyReturnPct: Number(fund.daily_return ?? 0) * 100,
-      })),
-    [overview?.funds],
+  const allSeriesPoints = series?.points ?? [];
+  const visibleSeriesPoints = useMemo(() => {
+    const cutoff = cutoffForPeriod(allSeriesPoints, period);
+    return cutoff ? allSeriesPoints.filter((point) => point.valuation_date >= cutoff) : allSeriesPoints;
+  }, [allSeriesPoints, period]);
+  const navChartData = useMemo(
+    () => visibleSeriesPoints.map((point) => ({
+      ...point,
+      index: point.company_index === null ? null : Number(point.company_index),
+      label: point.valuation_date.slice(5),
+    })),
+    [visibleSeriesPoints],
   );
+  const drawdownChartData = useMemo(
+    () => visibleSeriesPoints.map((point) => ({
+      ...point,
+      drawdownPct: point.drawdown === null ? null : Number(point.drawdown) * 100,
+      label: point.valuation_date.slice(5),
+    })),
+    [visibleSeriesPoints],
+  );
+  const drawdownStats = useMemo(() => {
+    const values = allSeriesPoints
+      .map((point) => (point.drawdown === null ? null : Number(point.drawdown)))
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const current = allSeriesPoints[allSeriesPoints.length - 1]?.drawdown ?? null;
+    return { max: values.length ? String(Math.min(...values)) : null, current };
+  }, [allSeriesPoints]);
 
   return (
     <div className="fd-page">
@@ -129,85 +178,69 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      <div className="fd-chart-grid">
-        <Card className="fd-chart-card" title={<span className="fd-section-title">基金资产规模</span>} loading={loading}>
-          <div className="fd-chart fd-chart--assets" role="img" aria-label="各基金资产规模和资产净值柱状图">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartFunds} margin={{ top: 8, right: 12, left: 0, bottom: 42 }}>
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="shortName"
-                  interval={0}
-                  angle={-32}
-                  textAnchor="end"
-                  height={54}
-                  tick={{ fill: "var(--muted-strong)", fontSize: 11 }}
-                  axisLine={{ stroke: "var(--border)" }}
-                  tickLine={false}
-                />
-                <YAxis
-                  tickFormatter={(value: number) => `${value.toFixed(0)}亿`}
-                  tick={{ fill: "var(--muted-strong)", fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={42}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "rgba(185, 133, 69, 0.08)" }}
-                  labelFormatter={(_, payload) => payload[0]?.payload?.name ?? "基金"}
-                  formatter={(value: unknown, name: unknown) => [
-                    `${typeof value === "number" ? value.toFixed(2) : "0.00"} 亿`,
-                    name === "totalAssetsBn" ? "资产规模" : "资产净值",
-                  ]}
-                />
-                <Bar dataKey="totalAssetsBn" name="资产规模" fill="var(--chart)" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="netAssetValueBn" name="资产净值" fill="var(--primary-dark)" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      <div className="fd-chart-grid fd-chart-grid--dashboard">
+        <Card
+          className="fd-chart-card"
+          title={<span className="fd-section-title">净值走势</span>}
+          loading={loading}
+          extra={
+            <div className="fd-period-tabs" aria-label="净值走势时间范围">
+              {periodOptions.map((option) => (
+                <Button
+                  key={option.key}
+                  size="small"
+                  type={period === option.key ? "primary" : "default"}
+                  onClick={() => setPeriod(option.key)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          }
+        >
+          {navChartData.length === 0 ? <div className="fd-chart-empty">暂无可用公司净值历史</div> : (
+            <div className="fd-chart fd-chart--company-nav" role="img" aria-label="由基金每日净值加权生成的组合净值走势折线图">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={navChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" minTickGap={28} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
+                  <YAxis domain={["auto", "auto"]} tickFormatter={(value: number) => value.toFixed(2)} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    labelFormatter={(_, payload) => payload[0]?.payload?.valuation_date ?? "估值日"}
+                    formatter={(value: unknown) => [typeof value === "number" ? value.toFixed(4) : "—", "组合净值"]}
+                  />
+                  <Line type="monotone" dataKey="index" name="组合净值" stroke="var(--chart)" strokeWidth={2} dot={navChartData.length === 1 ? { r: 3 } : false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="fd-chart-note">组合净值由各基金每日净资产按前一估值日权重计算，不含外部基准。</div>
         </Card>
-        <Card className="fd-chart-card" title={<span className="fd-section-title">基金日收益分布</span>} loading={loading}>
-          <div className="fd-chart fd-chart--returns" role="img" aria-label="各基金日收益横向柱状图">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartFunds}
-                layout="vertical"
-                margin={{ top: 8, right: 18, left: 6, bottom: 8 }}
-              >
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
-                <XAxis
-                  type="number"
-                  tickFormatter={(value: number) => `${value.toFixed(1)}%`}
-                  tick={{ fill: "var(--muted-strong)", fontSize: 11 }}
-                  axisLine={{ stroke: "var(--border)" }}
-                  tickLine={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="shortName"
-                  width={78}
-                  tick={{ fill: "var(--muted-strong)", fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "rgba(185, 133, 69, 0.08)" }}
-                  labelFormatter={(_, payload) => payload[0]?.payload?.name ?? "基金"}
-                  formatter={(value: unknown) => [`${typeof value === "number" ? value.toFixed(2) : "0.00"}%`, "日收益"]}
-                />
-                <Bar dataKey="dailyReturnPct" name="日收益" radius={[0, 3, 3, 0]}>
-                  {chartFunds.map((fund) => (
-                    <Cell
-                      key={fund.id}
-                      fill={fund.dailyReturnPct > 0 ? "var(--negative)" : fund.dailyReturnPct < 0 ? "var(--positive)" : "var(--muted)"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+
+        <Card className="fd-chart-card" title={<span className="fd-section-title">回撤分析</span>} loading={loading}>
+          <div className="fd-chart-stats">
+            <div><span>最大回撤</span><strong style={{ color: returnColor(drawdownStats.max) }}>{pct(drawdownStats.max)}</strong></div>
+            <div><span>当前回撤</span><strong style={{ color: returnColor(drawdownStats.current) }}>{pct(drawdownStats.current)}</strong></div>
           </div>
+          {drawdownChartData.length === 0 ? <div className="fd-chart-empty">暂无可用回撤历史</div> : (
+            <div className="fd-chart fd-chart--drawdown" role="img" aria-label="组合净值回撤分析折线图">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={drawdownChartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" minTickGap={28} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
+                  <YAxis domain={["auto", 0]} tickFormatter={(value: number) => `${value.toFixed(1)}%`} tick={{ fill: "var(--muted-strong)", fontSize: 11 }} axisLine={false} tickLine={false} width={46} />
+                  <ReferenceLine y={0} stroke="var(--border-strong)" />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    labelFormatter={(_, payload) => payload[0]?.payload?.valuation_date ?? "估值日"}
+                    formatter={(value: unknown) => [typeof value === "number" ? `${value.toFixed(2)}%` : "—", "回撤"]}
+                  />
+                  <Line type="monotone" dataKey="drawdownPct" name="回撤" stroke="var(--positive)" strokeWidth={2} dot={drawdownChartData.length === 1 ? { r: 3 } : false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Card>
       </div>
 

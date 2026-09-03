@@ -66,7 +66,7 @@ export default function NavSeries({ fundId }: { fundId: number }) {
     <div>
       <Card
         className="fd-chart-card"
-        title="净值走势"
+        title="历史净值走势"
         loading={loading}
         extra={
           <span>
